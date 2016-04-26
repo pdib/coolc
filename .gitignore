@@ -2,6 +2,7 @@
 *.o
 *.d
 *.SKEL
+*.output
 *.pl
 grading/
 
@@ -11,6 +12,7 @@ semant
 cgen
 
 cool-lex.cc
+cool-parse.cc
 
 *.TMP
 *.aps
