@@ -10,7 +10,7 @@ CSRC= parser-phase.cc utilities.cc stringtab.cc dumptype.cc \
 TSRC= myparser mycoolc cool-tree.aps
 CGEN= cool-parse.cc
 HGEN= cool-parse.h
-LIBS= semant cgen
+LIBS= 
 CFIL= ${CSRC} ${CGEN}
 HFIL= cool-tree.h cool-tree.handcode.h 
 LSRC= Makefile
@@ -55,24 +55,6 @@ dotest:	parser good.cl bad.cl
 	-./myparser good.cl 
 	@echo "\nRunning parser on bad.cl\n"
 	-./myparser bad.cl
-
-${LIBS}:
-	${CLASSDIR}/etc/link-object ${ASSN} $@
-
-# These dependencies allow you to get the starting files for
-# the assignment.  They will not overwrite a file you already have.
-
-${SRC} :								
-	-${CLASSDIR}/etc/copy-skel ${ASSN} ${SRC}
-
-${LSRC} :
-	-${CLASSDIR}/etc/link-shared ${ASSN} ${LSRC}
-
-${TSRC} ${CSRC}:
-	-ln -s ${CLASSDIR}/src/PA${ASSN}/$@ $@
-
-${HSRC}:
-	-ln -s ${CLASSDIR}/include/PA${ASSN}/$@ $@
 
 submit-clean: ${OUTPUT}
 	-rm -f *.s core ${OBJS} ${CGEN} ${HGEN} lexer *~ parser cgen semant
