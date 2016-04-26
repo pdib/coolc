@@ -9,5 +9,7 @@ parser
 semant
 cgen
 
+cool-lex.cc
+
 *.TMP
 *.aps
