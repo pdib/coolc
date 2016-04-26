@@ -10,7 +10,7 @@ TSRC= mycoolc
 HSRC= 
 CGEN= cool-lex.cc
 HGEN=
-LIBS= parser semant cgen
+LIBS= 
 CFIL= ${CSRC} ${CGEN}
 LSRC= Makefile
 OBJS= ${CFIL:.cc=.o}
@@ -27,7 +27,7 @@ FLEX=flex ${FFLAGS}
 DEPEND = ${CC} -MM ${CPPINCLUDE}
 
 
-source : ${SRC} ${TSRC} ${LSRC} ${LIBS} lsource
+source : ${SRC} ${TSRC} ${LSRC} ${LIBS} lsource lexer
 
 lsource: ${LSRC}
 
@@ -46,24 +46,6 @@ cool-lex.cc: cool.flex
 
 dotest:	lexer test.cl
 	./lexer test.cl
-
-${LIBS}:
-	${CLASSDIR}/etc/link-object ${ASSN} $@
-
-# These dependencies allow you to get the starting files for
-# the assignment.  They will not overwrite a file you already have.
-
-${SRC} :								
-	${CLASSDIR}/etc/copy-skel ${ASSN} ${SRC}
-
-${LSRC} :
-	${CLASSDIR}/etc/link-shared ${ASSN} ${LSRC}
-
-${TSRC} ${CSRC}:
-	-ln -s ${CLASSDIR}/src/PA${ASSN}/$@ $@
-
-${HSRC}:
-	-ln -s ${CLASSDIR}/include/PA${ASSN}/$@ $@
 
 submit-clean: ${OUTPUT}
 	-rm -f *.s core ${OBJS} lexer cool-lex.cc *~ parser cgen semant
