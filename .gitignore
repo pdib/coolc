@@ -1,0 +1,13 @@
+*.o
+*.d
+*.SKEL
+*.pl
+grading/
+
+lexer
+parser
+semant
+cgen
+
+*.TMP
+*.aps
