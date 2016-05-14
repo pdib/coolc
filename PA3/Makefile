@@ -1,7 +1,7 @@
 
 ASSN = 3
 CLASS= cs143
-CLASSDIR= /home/lagus/cs143/assignments/
+CLASSDIR= ../
 LIB= -lfl
 
 SRC= cool.y cool-tree.handcode.h good.cl bad.cl README
@@ -20,7 +20,7 @@ OUTPUT= good.output bad.output
 
 CPPINCLUDE= -I. -I${CLASSDIR}/include/PA${ASSN} -I${CLASSDIR}/src/PA${ASSN}
 
-BFLAGS = -d -v -y -b cool --debug -p cool_yy
+BFLAGS = -Wconflicts-sr -d -v -y -b cool --debug -p cool_yy
 
 CC=g++
 CFLAGS=-g -Wall -Wno-unused -Wno-deprecated -Wno-write-strings -DDEBUG ${CPPINCLUDE}

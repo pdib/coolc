@@ -76,7 +76,7 @@
     
     void yyerror(char *s);        /*  defined below; called for each parse error */
     extern int yylex();           /*  the entry point to the lexer  */
-    Symbol self;
+    Symbol self = idtable.add_string("self");
     /************************************************************************/
     /*                DONT CHANGE ANYTHING IN THIS SECTION                  */
     
@@ -135,7 +135,7 @@
     %type <class_> class
     %type <formals> formal_list
     %type <formal> formal
-    %type <features> feature_list
+    %type <features> optional_feature_list feature_list declaration_list
     %type <feature> feature declaration
     %type <expressions> expression_list expression_block
     %type <expression> expression
@@ -143,6 +143,15 @@
     %type <case_> case_
     /* Precedence declarations go here. */
     
+    %right ASSIGN
+    %precedence NOT
+    %nonassoc '<' '=' LE
+    %left '+' '-'
+    %left '*' '/'
+    %precedence ISVOID
+    %precedence '~'
+    %precedence '@'
+    %precedence '.'
     
     %%
     /* 
@@ -154,97 +163,121 @@
     }
     ;
     
-    class_list : class			/* single class */
+    class_list : class ';'		/* single class */
     { 
       $$ = single_Classes($1);
       parse_results = $$; 
     }
-               | class_list class	/* several classes */
+               | class_list  class ';'	/* several classes */
     { 
       $$ = append_Classes($1,single_Classes($2)); 
       parse_results = $$; 
     }
+| class_list error ';'
+
     ;
     
     /* If no parent is specified, the class inherits from the Object class. */
-    class	: CLASS TYPEID '{' feature_list '}' ';'
+    class	: CLASS TYPEID '{' optional_feature_list '}' 
     { 
-      self = $2;
-       $$ = class_($2,idtable.add_string("Object"),$4,
+        $$ = class_($2,idtable.add_string("Object"),$4,
 		  stringtable.add_string(curr_filename)); 
     }
-                | CLASS TYPEID INHERITS TYPEID '{' feature_list '}' ';'
+                | CLASS TYPEID INHERITS TYPEID '{' optional_feature_list '}' 
     {
       $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); 
     }
-                | error ';'
+| error
     ;
-    
+
+optional_feature_list: %empty { $$ = nil_Features(); }
+| feature_list
+;
+
     /* Feature list may be empty, but no empty features in list. */
-    feature_list: feature ';'  { $$ = single_Features($1); }
-                | feature_list feature ';' { $$ = append_Features($1, single_Features($2)); }
-		| /* empty */ { $$ = nil_Features(); }
+feature_list: feature ';'  { $$ = single_Features($1); }
+| feature_list feature ';' { $$ = append_Features($1, single_Features($2)); }
+| feature_list error ';'
+| error  { $$ = nil_Features(); }
     ;
 
 feature: OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}' { $$ = method($1, $3, $6, $8); }
-           | declaration { $$ = $1; }
-           | error
+| declaration { $$ = $1; }
     ;
 
     formal_list: formal { $$ = single_Formals($1); }
-               | formal_list ',' formal { $$ = append_Formals($1, single_Formals($3)); }
-               | /* empty */ { $$ = nil_Formals(); }
+| formal_list ',' formal { $$ = append_Formals($1, single_Formals($3)); }
+| %empty { $$ = nil_Formals(); }
+| formal_list ',' error
     ;
 
     formal: OBJECTID ':' TYPEID { $$ = formal($1, $3); }
-          | error;
 
-    expression_block: expression ';'  { $$ = single_Expressions($1); }
-               | expression_block expression ';' { $$ = append_Expressions($1, single_Expressions($2)); }
-    ;
+expression_block: expression ';' { $$ = single_Expressions($1); }
+               | expression_block  expression  ';' { $$ = append_Expressions($1, single_Expressions($2)); }
+               | expression_block error ';'
+               | error { $$ = nil_Expressions(); }
+;
 
     expression_list: expression { $$ = single_Expressions($1); }
-               | expression_list ',' expression { $$ = append_Expressions($1, single_Expressions($3)); }
-               | /*empty*/ { $$ = nil_Expressions(); }
+| expression_list ',' expression { $$ = append_Expressions($1, single_Expressions($3)); }
+| %empty { $$ = nil_Expressions(); }
+| expression_list ',' error
+| error { $$ = nil_Expressions(); }
     ;
 
-    declaration: OBJECTID ':' TYPEID { $$ = attr($1, $3, no_expr()); }
-               | OBJECTID ':' TYPEID ASSIGN expression { $$ = attr($1, $3, $5); }
+declaration_list: declaration { $$ = single_Features($1); }
+| declaration_list ',' declaration { $$ = append_Features($1, single_Features($3)) ;}
+| declaration_list ',' error
+| error { $$ = nil_Features(); }
+;
+declaration: OBJECTID ':' TYPEID { $$ = attr($1, $3, no_expr()); }               
+| OBJECTID ':' TYPEID ASSIGN expression { $$ = attr($1, $3, $5); }
 	       ;
 
-    case_list: case_ { $$ = single_Cases($1); }
-             | case_list case_ { $$ = append_Cases($1, single_Cases($2)); }
+    case_list: case_ ';' { $$ = single_Cases($1); }
+             | case_list case_ ';' { $$ = append_Cases($1, single_Cases($2)); }
+| case_list error ';'
 ;
 
-    case_   : OBJECTID ':' TYPEID DARROW expression ';' { $$ = branch($1, $3, $5); }
-            | error ';'
+    case_   : OBJECTID ':' TYPEID DARROW expression  { $$ = branch($1, $3, $5); }
 ;
     expression: OBJECTID ASSIGN expression { $$ =  assign($1, $3); }
-              | expression '@' TYPEID '.' OBJECTID '(' expression_list ')' { $$ = static_dispatch($1, $3, $5, $7); }
+| expression '@' TYPEID '.' OBJECTID '(' expression_list ')' { $$ = static_dispatch($1, $3, $5, $7); }
               | expression '.' OBJECTID '(' expression_list ')' { $$ = dispatch($1, $3, $5); }
-| OBJECTID '(' expression_list ')' { $$ = dispatch(object(self), $1, $3); }
+| OBJECTID '(' expression_list ')'
+{
+    $$ = dispatch(object(self), $1, $3);
+}
               | IF expression THEN expression ELSE expression FI { $$ = cond($2, $4, $6); } 
               | WHILE expression LOOP expression POOL { $$ = loop($2, $4); }
               | '{' expression_block '}' { $$ = block($2); }
-              | LET OBJECTID ':' TYPEID ASSIGN expression IN expression { $$ = let($2, $4, $6, $8); }
+| LET declaration_list IN expression {
+    int len = $2->len();
+    Expression expr = $4;
+    for (int i = len - 1; i >= 0 ; i--) {
+        attr_class* declaration = static_cast<attr_class*>($2->nth(i));
+        expr = let(declaration->name, declaration->type_decl, declaration->init, expr);
+    }
+    $$ = expr;
+ }
               | CASE expression OF case_list ESAC { $$ = typcase($2, $4); }
               | NEW TYPEID                    { $$ = new_($2); }
               | ISVOID expression             { $$ = isvoid($2); }
-              | expression '+' expression     { $$ = plus($1, $3); }
-              | expression '-' expression     { $$ = sub($1, $3); }
               | expression '*' expression     { $$ = mul($1, $3); }
               | expression '/' expression     { $$ = divide($1, $3); }
+              | expression '+' expression     { $$ = plus($1, $3); }
+              | expression '-' expression     { $$ = sub($1, $3); }
               | '~' expression                { $$ = neg($2); }
               | expression '<' expression     { $$ = lt($1, $3); }
               | expression LE expression      { $$ = leq($1, $3); }
               | expression '=' expression     { $$ = eq($1, $3); }
-              | NOT expression                { $$ = neg($2); }
+              | NOT expression                { $$ = comp($2); }
               | '(' expression ')'	      { $$ = $2; }
               | OBJECTID                      { $$ = object($1); } 
               | STR_CONST                     { $$ = string_const($1);}
               | INT_CONST                     { $$ = int_const($1); }
               | BOOL_CONST                    { $$ = bool_const($1); }
-              | error
     ;
     /* end of grammar */
     %%

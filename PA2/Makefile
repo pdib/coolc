@@ -1,7 +1,7 @@
 
 ASSN = 2
 CLASS=cs143 
-CLASSDIR=/home/lagus/cs143/assignments/
+CLASSDIR=../
 LIB=-lfl 
 
 SRC= cool.flex test.cl README 

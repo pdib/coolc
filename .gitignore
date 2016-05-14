@@ -3,7 +3,7 @@
 *.d
 *.SKEL
 *.output
-*.pl
+
 grading/
 
 lexer
