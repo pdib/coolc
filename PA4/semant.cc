@@ -9,6 +9,9 @@
 extern int semant_debug;
 extern char *curr_filename;
 
+#define LOG_ERROR(node) semant_error(); error_stream << "Error in file " << node->get_filename() \
+    << " at line " << node->get_line_number() << ": "
+
 //////////////////////////////////////////////////////////////////////
 //
 // Symbols
@@ -84,7 +87,8 @@ static void initialize_constants(void)
 
 ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) {
     classes_table.enterscope();
-
+    symbol_table.enterscope();
+    method_table.enterscope();
     install_basic_classes();
 
     int classes_len = classes->len();
@@ -92,6 +96,12 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
     // Install all classes
     for (int i =  0; i < classes_len; i++) {
         class__class* current_class = static_cast<class__class*>(classes->nth(i));
+        class__class* previous_def = static_cast<class__class*>(
+            classes_table.lookup(current_class->get_name()));
+        if (previous_def != NULL) {
+            LOG_ERROR(current_class)
+                << "Class " << current_class->get_name() << " is already defined.";
+        }
         classes_table.addid(current_class->get_name(), current_class);
     }
 
@@ -106,7 +116,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
             class__class* parent = static_cast<class__class*>(classes_table.lookup(parent_symbol));
             if (parent == NULL)  {
                 is_inheritance_graph_valid = false;
-                error_stream << "Error at line " << current_class->get_line_number() << endl
+                LOG_ERROR(current_class)
                              << "Class " << current_class->get_name()
                              << " inherits from " << parent_symbol
                              << " which was not found."<< endl;
@@ -117,7 +127,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
                 parent_symbol == Str ||
                 parent_symbol == Bool) {
                 is_inheritance_graph_valid = false;
-                error_stream << "Error at line " << current_class->get_line_number() << endl
+                LOG_ERROR(current_class)
                              << "Class " << current_class->get_name()
                              << " inherits from " << parent_symbol
                              << ", which is not allowed."<< endl;
@@ -128,7 +138,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
             for (size_t j = 0; j < parents.size(); j++) {
                 if (parents[j] ==  parent_symbol) {
                     inheritance_cycle = true;
-                    error_stream << "Error at line " << current_class->get_line_number() << endl
+                    LOG_ERROR(current_class)
                              << "Class " << current_class->get_name()
                              << " is involved in an inheritance cycle." << endl;
                     break;
@@ -138,6 +148,10 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
             if (inheritance_cycle) {
                 is_inheritance_graph_valid = false;
                 break;
+            }
+
+            if (!parent->has_child(current_class->get_name())) {
+                parent->children.push_back(current_class->get_name());
             }
             
             current_class = parent;
@@ -149,7 +163,110 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
         exit(1);
     }
 
-    // For each class, traverse the AST and add types
+    // For each class, traverse the AST and add
+    Class__class* root_class = classes_table.lookup(Object);
+    type_check_class(static_cast<class__class*>(root_class));
+    
+    // Check for Main class presence and for main() method inside it
+}
+
+void ClassTable::type_check_class(class__class * current_class) {
+    Features features = current_class->get_features();
+    int features_len = features->len();
+    symbol_table.enterscope();
+    method_table.enterscope();
+    
+    for (int i = 0; i < features_len; i++) {
+        Feature feature = features->nth(i);
+        switch (feature->feature_type()) {
+        case FeatureType::attr:
+            decl_attr(static_cast<attr_class*>(feature), current_class);
+            break;
+        case FeatureType::method:
+            decl_method(static_cast<method_class*>(feature), current_class);
+            break;
+        }
+    }
+
+    // Type check children classes
+    for(Symbol child: current_class->children) {
+        Class__class* child_class = classes_table.lookup(child);
+        type_check_class(static_cast<class__class*>(child_class));
+    }
+
+    method_table.exitscope();
+    symbol_table.exitscope();
+}
+
+void ClassTable::decl_attr(attr_class* current_attr, class__class* current_class) {
+    Symbol previous_def = symbol_table.lookup(current_attr->get_name());
+
+    if (previous_def != NULL) {
+        LOG_ERROR(current_class)
+            << "Class " << current_class->get_name()
+            << " is redefining attribute " << current_attr->get_name() << endl;
+        return;
+    }
+
+    MethodDefinitions method_def = method_table.lookup(current_attr->get_name());
+
+    if (method_def != NULL) {
+        LOG_ERROR(current_class)
+            << "Class " << current_class->get_name()
+            << " is trying to redefine method " << current_attr->get_name() << " as an attribute." << endl;
+        return;
+    }
+
+    Symbol attr_type = current_attr->get_type();
+    Class_ type = classes_table.lookup(attr_type);
+    // SELF_TYPE is  allowed as an attribute type
+    if (attr_type != SELF_TYPE && type == NULL) {
+        LOG_ERROR(current_class)
+            << "Undeclared type " << attr_type << endl;
+        return;
+    }
+    
+    symbol_table.addid(current_attr->get_name(), current_attr->get_type());
+}
+
+void ClassTable::decl_method(method_class* current_method, class__class* current_class)  {
+    Symbol previous_def = symbol_table.lookup(current_method->get_name());
+
+    if (previous_def != NULL) {
+        LOG_ERROR(current_class)
+            << "Class " << current_class->get_name()
+            << " is trying to redefine attribute " << current_method->get_name() << " as an method." << endl;
+        return;
+    }
+
+    MethodDefinitions method_def = method_table.lookup(current_method->get_name());
+    MethodDefinition new_def = MethodDefinition::from_method_class(current_method);
+
+    std::vector<Symbol> undeclared_types = new_def.get_undeclared_types(classes_table);
+    if (undeclared_types.size() > 0) {
+        for (Symbol type: undeclared_types) {
+            LOG_ERROR(current_class)
+                << "Undeclared type " << type << endl;
+        }
+        return;
+    }
+    
+    if (method_def == NULL)  {
+        method_def = new std::vector<MethodDefinition>;
+        method_table.addid(current_method->get_name(), method_def);
+    } else {
+        for (MethodDefinition def : *method_def) {
+            if (new_def.has_same_args(def)) {
+                if (def.return_type != new_def.return_type) {
+                    LOG_ERROR(current_class)
+                        << "Class " << current_class->get_name()
+                        << " is trying to redefine method " << current_method->get_name() << endl;
+                    return;
+                }
+            }
+        }
+    }
+    method_def->push_back(new_def);
 }
 
 void ClassTable::install_basic_classes() {
@@ -322,3 +439,41 @@ void program_class::semant()
 }
 
 
+MethodDefinition MethodDefinition::from_method_class(method_class * method) {
+    MethodDefinition result;
+    result.return_type = method->get_return_type();
+    Formals formals = method->get_formals();
+        
+    for (int i = 0; i < formals->len(); i++ ) {
+        formal_class* formal = static_cast<formal_class*>(formals->nth(i));
+        result.argument_types.push_back(formal->get_type());
+    }
+        
+    return result;
+}
+
+bool MethodDefinition::has_same_args(MethodDefinition const & other) {
+    if (this->argument_types.size() != other.argument_types.size())  {
+        return false;
+    }
+    for (size_t i = 0; i < this->argument_types.size(); i++)  {
+        if (this->argument_types[i] != other.argument_types[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<Symbol> MethodDefinition::get_undeclared_types(SymbolTable<Symbol, Class__class> & types) {
+    std::vector<Symbol> undeclared_types;
+    // SELF_TYPE is allowed as a  return type
+    if (return_type != SELF_TYPE && types.lookup(return_type) == NULL) {
+        undeclared_types.push_back(return_type);
+    }
+    for (Symbol arg_type : argument_types) {
+        if (types.lookup(arg_type) == NULL) {
+            undeclared_types.push_back(arg_type);
+        }
+    }
+    return undeclared_types;
+}

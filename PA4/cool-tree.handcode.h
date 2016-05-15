@@ -5,6 +5,7 @@
 #define COOL_TREE_HANDCODE_H
 
 #include <iostream>
+#include <vector>
 #include "tree.h"
 #include "cool.h"
 #include "stringtab.h"
@@ -63,18 +64,38 @@ virtual void dump_with_types(ostream&,int) = 0;
 Symbol get_filename() { return filename; }             \
 void dump_with_types(ostream&,int);                    \
 Symbol get_name() { return this->name; } \
-Symbol get_parent() { return this->parent; } 
+Symbol get_parent() { return this->parent; }  \
+Features get_features() { return this->features; } \
+std::vector<Symbol> children; \
+bool has_child(Symbol s) { for(Symbol c : children) { if (c == s) { return true; } } return false; }
+
+enum class FeatureType {
+    attr,
+    method
+};
 
 
 #define Feature_EXTRAS                                        \
-virtual void dump_with_types(ostream&,int) = 0; 
+virtual void dump_with_types(ostream&,int) = 0;  \
+virtual FeatureType  feature_type() = 0;
 
 
 #define Feature_SHARED_EXTRAS                                       \
 void dump_with_types(ostream&,int);    
 
+#define method_EXTRAS \
+    FeatureType feature_type() override { return FeatureType::method; }  \
+    Symbol get_name() { return name; } \
+    Symbol get_return_type() { return return_type; } \
+    Formals get_formals()  { return formals; } \
+    Expression get_expression() { return expr; } 
 
 
+#define attr_EXTRAS \
+    FeatureType feature_type() override { return FeatureType::attr; } \
+    Symbol get_name() { return name; } \
+    Symbol get_type() { return type_decl; } \
+    Expression get_init() { return init; } 
 
 
 #define Formal_EXTRAS                              \
@@ -82,7 +103,9 @@ virtual void dump_with_types(ostream&,int) = 0;
 
 
 #define formal_EXTRAS                           \
-void dump_with_types(ostream&,int);
+void dump_with_types(ostream&,int); \
+Symbol get_name() { return name; } \
+Symbol get_type() { return type_decl; } 
 
 
 #define Case_EXTRAS                             \
