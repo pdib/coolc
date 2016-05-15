@@ -1,8 +1,7 @@
-
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <vector>
 #include "semant.h"
 #include "utilities.h"
 
@@ -84,9 +83,73 @@ static void initialize_constants(void)
 
 
 ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) {
+    classes_table.enterscope();
 
-    /* Fill this in */
+    install_basic_classes();
 
+    int classes_len = classes->len();
+    
+    // Install all classes
+    for (int i =  0; i < classes_len; i++) {
+        class__class* current_class = static_cast<class__class*>(classes->nth(i));
+        classes_table.addid(current_class->get_name(), current_class);
+    }
+
+    // Check inheritance graph
+    bool is_inheritance_graph_valid = true;
+    for (int i = 0; i < classes_len; i++) {
+        class__class* current_class = static_cast<class__class*>(classes->nth(i));
+        std::vector<Symbol> parents;
+        while (current_class->get_name() != Object) {
+            parents.push_back(current_class->get_name());
+            Symbol parent_symbol = current_class->get_parent();
+            class__class* parent = static_cast<class__class*>(classes_table.lookup(parent_symbol));
+            if (parent == NULL)  {
+                is_inheritance_graph_valid = false;
+                error_stream << "Error at line " << current_class->get_line_number() << endl
+                             << "Class " << current_class->get_name()
+                             << " inherits from " << parent_symbol
+                             << " which was not found."<< endl;
+                break;
+            }
+
+            if (parent_symbol == Int ||
+                parent_symbol == Str ||
+                parent_symbol == Bool) {
+                is_inheritance_graph_valid = false;
+                error_stream << "Error at line " << current_class->get_line_number() << endl
+                             << "Class " << current_class->get_name()
+                             << " inherits from " << parent_symbol
+                             << ", which is not allowed."<< endl;
+                break;
+            }
+
+            bool inheritance_cycle = false;
+            for (size_t j = 0; j < parents.size(); j++) {
+                if (parents[j] ==  parent_symbol) {
+                    inheritance_cycle = true;
+                    error_stream << "Error at line " << current_class->get_line_number() << endl
+                             << "Class " << current_class->get_name()
+                             << " is involved in an inheritance cycle." << endl;
+                    break;
+                }
+            }
+
+            if (inheritance_cycle) {
+                is_inheritance_graph_valid = false;
+                break;
+            }
+            
+            current_class = parent;
+        }
+    }
+
+    if (!is_inheritance_graph_valid) {
+        error_stream << "Invalid inheritance graph. Aborting compilation." << endl;
+        exit(1);
+    }
+
+    // For each class, traverse the AST and add types
 }
 
 void ClassTable::install_basic_classes() {
@@ -188,6 +251,12 @@ void ClassTable::install_basic_classes() {
 						      Str, 
 						      no_expr()))),
 	       filename);
+
+    classes_table.addid(Object, Object_class);
+    classes_table.addid(IO, IO_class);
+    classes_table.addid(Int, Int_class);
+    classes_table.addid(Bool, Bool_class);
+    classes_table.addid(Str, Str_class);
 }
 
 ////////////////////////////////////////////////////////////////////

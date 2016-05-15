@@ -24,7 +24,8 @@ private:
   int semant_errors;
   void install_basic_classes();
   ostream& error_stream;
-
+  SymbolTable<Symbol, Class__class> classes_table;
+  
 public:
   ClassTable(Classes);
   int errors() { return semant_errors; }

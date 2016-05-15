@@ -31,6 +31,8 @@ FLEX=flex ${FFLAGS}
 BISON= bison ${BFLAGS}
 DEPEND = ${CC} -MM ${CPPINCLUDE}
 
+all: semant
+
 source: ${SRC} ${TSRC} ${LIBS} lsource
 
 lsource: ${LSRC}
@@ -55,6 +57,12 @@ symtab_example: symtab_example.cc
 
 .cc.o:
 	${CC} ${CFLAGS} -c $<
+
+lexer:
+	cp ${CLASSDIR}/PA2/lexer lexer
+
+parser:
+	cp ${CLASSDIR}/PA3/parser parser
 
 dotest:	semant good.cl bad.cl
 	@echo "\nRunning semantic checker on good.cl\n"
