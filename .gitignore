@@ -15,4 +15,4 @@ cool-lex.cc
 cool-parse.cc
 
 *.TMP
-*.aps
+

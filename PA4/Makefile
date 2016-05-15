@@ -1,7 +1,7 @@
 
 ASSN = 4
 CLASS= cs143
-CLASSDIR= /home/lagus/cs143/cool
+CLASSDIR=../.
 LIB= -lfl
 AR= gar
 ARCHIVE_NEW= -cr
@@ -12,7 +12,7 @@ CSRC= semant-phase.cc symtab_example.cc  handle_flags.cc  ast-lex.cc ast-parse.c
 TSRC= mycoolc mysemant cool-tree.aps
 CGEN=
 HGEN=
-LIBS= lexer parser cgen
+LIBS= lexer parser 
 CFIL= semant.cc ${CSRC} ${CGEN}
 LSRC= Makefile
 OBJS= ${CFIL:.cc=.o}
@@ -47,7 +47,7 @@ change-prot:
 
 SEMANT_OBJS := ${filter-out symtab_example.o,${OBJS}}
 
-semant:  ${SEMANT_OBJS} lexer parser cgen
+semant:  ${SEMANT_OBJS} lexer parser 
 	${CC} ${CFLAGS} ${SEMANT_OBJS} ${LIB} -o semant
 
 symtab_example: symtab_example.cc 
@@ -62,29 +62,11 @@ dotest:	semant good.cl bad.cl
 	@echo "\nRunning semantic checker on bad.cl\n"
 	-./mysemant bad.cl
 
-${LIBS}:
-	${CLASSDIR}/etc/link-object ${ASSN} $@
-
-# These dependencies allow you to get the starting files for
-# the assignment.  They will not overwrite a file you already have.
-
-${SRC} :								
-	-${CLASSDIR}/etc/copy-skel ${ASSN} ${SRC}
-
-${LSRC} :
-	-${CLASSDIR}/etc/link-shared ${ASSN} ${LSRC}
-
-${TSRC} ${CSRC}:
-	-ln -s ${CLASSDIR}/src/PA${ASSN}/$@ $@
-
-${HSRC}:
-	-ln -s ${CLASSDIR}/include/PA${ASSN}/$@ $@
-
 submit-clean: ${OUTPUT}
 	-rm -f *.s core ${OBJS} ${CGEN} ${HGEN} lexer *~ parser cgen semant symtab_example
 
 clean :
-	-rm -f ${OUTPUT} *.s core ${OBJS} semant cgen symtab_example parser lexer *~ *.a *.o
+	-rm -f ${OUTPUT} *.s core ${OBJS} semant cgen symtab_example parser lexer *~ *.a *.o *.d
 
 clean-compile:
 	@-rm -f core ${OBJS} ${LSRC}
