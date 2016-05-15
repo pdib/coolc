@@ -42,8 +42,12 @@ private:
   SymbolTable<Symbol, MethodDefinitions_> method_table;
   
   void type_check_class(class__class * current_class);
+  void type_check_attr(attr_class* current_attr, class__class * current_class);
+  Symbol type_check_expression(Expression expr, class__class* current_class, Symbol expected_type);
+  void type_check_method(method_class* current_method, class__class * current_class);
   void decl_attr(attr_class* current_attr, class__class* current_class);
   void decl_method(method_class* current_method, class__class* current_class);
+  bool is_descendant(Symbol desc, Symbol ancestor);
 
 public:
   ClassTable(Classes);

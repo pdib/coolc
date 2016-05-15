@@ -188,6 +188,18 @@ void ClassTable::type_check_class(class__class * current_class) {
         }
     }
 
+    for (int i = 0; i < features_len; i++) {
+        Feature feature = features->nth(i);
+        switch (feature->feature_type()) {
+        case FeatureType::attr:
+            type_check_attr(static_cast<attr_class*>(feature), current_class);
+            break;
+        case FeatureType::method:
+            type_check_method(static_cast<method_class*>(feature), current_class);
+            break;
+        }
+    }
+    
     // Type check children classes
     for(Symbol child: current_class->children) {
         Class__class* child_class = classes_table.lookup(child);
@@ -199,6 +211,15 @@ void ClassTable::type_check_class(class__class * current_class) {
 }
 
 void ClassTable::decl_attr(attr_class* current_attr, class__class* current_class) {
+    Symbol attr_type = current_attr->get_type();
+    Class_ type = classes_table.lookup(attr_type);
+    // SELF_TYPE is  allowed as an attribute type
+    if (attr_type != SELF_TYPE && type == NULL) {
+        LOG_ERROR(current_class)
+            << "Undeclared type " << attr_type << endl;
+        return;
+    }
+    
     Symbol previous_def = symbol_table.lookup(current_attr->get_name());
 
     if (previous_def != NULL) {
@@ -217,29 +238,26 @@ void ClassTable::decl_attr(attr_class* current_attr, class__class* current_class
         return;
     }
 
-    Symbol attr_type = current_attr->get_type();
-    Class_ type = classes_table.lookup(attr_type);
-    // SELF_TYPE is  allowed as an attribute type
-    if (attr_type != SELF_TYPE && type == NULL) {
-        LOG_ERROR(current_class)
-            << "Undeclared type " << attr_type << endl;
-        return;
-    }
-    
     symbol_table.addid(current_attr->get_name(), current_attr->get_type());
 }
 
 void ClassTable::decl_method(method_class* current_method, class__class* current_class)  {
-    Symbol previous_def = symbol_table.lookup(current_method->get_name());
-
-    if (previous_def != NULL) {
-        LOG_ERROR(current_class)
-            << "Class " << current_class->get_name()
-            << " is trying to redefine attribute " << current_method->get_name() << " as an method." << endl;
-        return;
+    Formals formals = current_method->get_formals();
+    int formals_len = formals->len();
+    std::vector<Symbol> arg_names;
+    for(int i = 0; i < formals_len; i++) {
+        Symbol name = (static_cast<formal_class*>(formals->nth(i)))->get_name();
+        for (Symbol other_name : arg_names)  {
+            if (name == other_name) {
+                LOG_ERROR(current_class)
+                    << "Method " << current_class->get_name() << "::" << current_method->get_name()
+                    << " has several arguments with the name " << name << endl;
+                return;
+            }
+        }
+        arg_names.push_back(name);
     }
 
-    MethodDefinitions method_def = method_table.lookup(current_method->get_name());
     MethodDefinition new_def = MethodDefinition::from_method_class(current_method);
 
     std::vector<Symbol> undeclared_types = new_def.get_undeclared_types(classes_table);
@@ -250,6 +268,17 @@ void ClassTable::decl_method(method_class* current_method, class__class* current
         }
         return;
     }
+
+    Symbol previous_def = symbol_table.lookup(current_method->get_name());
+
+    if (previous_def != NULL) {
+        LOG_ERROR(current_class)
+            << "Class " << current_class->get_name()
+            << " is trying to redefine attribute " << current_method->get_name() << " as an method." << endl;
+        return;
+    }
+
+    MethodDefinitions method_def = method_table.lookup(current_method->get_name());
     
     if (method_def == NULL)  {
         method_def = new std::vector<MethodDefinition>;
@@ -269,8 +298,105 @@ void ClassTable::decl_method(method_class* current_method, class__class* current
     method_def->push_back(new_def);
 }
 
-void ClassTable::install_basic_classes() {
+void ClassTable::type_check_attr(attr_class* current_attr, class__class* current_class) {
+    Expression init = current_attr->get_init();
+    Symbol attr_type = current_attr->get_type();
+    
+    type_check_expression(init, current_class, attr_type);
+}
 
+void ClassTable::type_check_method(method_class* current_method, class__class* current_class) {
+    Expression expr = current_method->get_expression();
+    Symbol return_type = current_method->get_return_type();
+
+    type_check_expression(expr, current_class, return_type);
+}
+
+#define TYPE_CHECK_ARITH_EXPR(EXPR, CLASS)   { \
+    final_type = Int; \
+    Expression left_operand = static_cast<CLASS*>(EXPR)->get_left_operand(); \
+    Expression right_operand = static_cast<CLASS*>(EXPR)->get_right_operand(); \
+    type_check_expression(left_operand, current_class, Int); \
+    type_check_expression(right_operand, current_class, Int); \
+    }
+
+Symbol ClassTable::type_check_expression(Expression expr, class__class* current_class, Symbol expected_type) {
+    Symbol final_type;
+    
+    // Handle different expressions
+    switch(expr->expression_type) {
+    case ExpressionType::branch:
+        break;
+    case ExpressionType::assign:
+        break;
+    case ExpressionType::static_dispatch:
+        break;
+    case ExpressionType::dispatch:
+        break;
+    case ExpressionType::cond:
+        break;
+    case ExpressionType::typcase:
+        break;
+    case ExpressionType::block:
+        break;
+    case ExpressionType::loop:
+        break;
+    case ExpressionType::let:
+        break;
+    case ExpressionType::plus:
+        TYPE_CHECK_ARITH_EXPR(expr, plus_class);
+        break;
+    case ExpressionType::sub:
+        TYPE_CHECK_ARITH_EXPR(expr, sub_class);
+        break;
+    case ExpressionType::mul:
+        TYPE_CHECK_ARITH_EXPR(expr, mul_class);
+        break;
+    case ExpressionType::divide:
+        TYPE_CHECK_ARITH_EXPR(expr, divide_class);
+        break;
+    case ExpressionType::string_const:
+        final_type = Str;
+        break;
+    case ExpressionType::bool_const:
+        final_type = Bool;
+        break;
+    case ExpressionType::int_const:
+        final_type = Int;
+        break;
+    case ExpressionType::no_expr:
+        final_type = No_type;
+        break;
+    default:
+        cerr << "Unhandled expression type " << endl;
+        break;
+    }
+
+    // What about No_type ?
+    if (!is_descendant(final_type, expected_type)) {
+        LOG_ERROR(current_class)
+            << "Cannot convert from " << final_type << " to " << expected_type << endl;
+        final_type = Object;
+    }
+    expr->type = final_type;
+    return final_type;
+}
+
+bool ClassTable::is_descendant(Symbol desc, Symbol ancestor) {
+    // What about SELF_TYPE ?
+    class__class *current_type = static_cast<class__class*>(classes_table.lookup(desc));
+    while (current_type != NULL) {
+        if (current_type->get_name()  == ancestor) {
+            return true;
+        }
+        Symbol parent_symbol = current_type->get_parent();
+        class__class *parent_type = static_cast<class__class*>(classes_table.lookup(parent_symbol));
+        current_type = parent_type;
+    }
+    return false;
+}
+
+void ClassTable::install_basic_classes() {
     // The tree package uses these globals to annotate the classes built below.
    // curr_lineno  = 0;
     Symbol filename = stringtable.add_string("<basic class>");

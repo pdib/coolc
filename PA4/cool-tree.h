@@ -69,7 +69,6 @@ public:
 #endif
 };
 
-
 // define simple phylum - Expression
 typedef class Expression_class *Expression;
 
