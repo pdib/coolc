@@ -629,7 +629,7 @@ public:
 // define constructor - comp
 class comp_class : public Expression_class {
 protected:
-   Expression e1;
+    Expression e1;
 public:
    comp_class(Expression a1) {
       e1 = a1;
