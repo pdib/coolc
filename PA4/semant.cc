@@ -100,6 +100,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
         if (previous_def != NULL) {
             LOG_ERROR(current_class)
                 << "Class " << current_class->get_name() << " is already defined.";
+            continue;
         }
         classes_table.addid(current_class->get_name(), current_class);
     }
@@ -124,7 +125,8 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
 
             if (parent_symbol == Int ||
                 parent_symbol == Str ||
-                parent_symbol == Bool) {
+                parent_symbol == Bool ||
+                parent_symbol == SELF_TYPE) {
                 is_inheritance_graph_valid = false;
                 LOG_ERROR(current_class)
                              << "Class " << current_class->get_name()
@@ -159,7 +161,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
 
     if (!is_inheritance_graph_valid) {
         error_stream << "Invalid inheritance graph. Aborting compilation." << endl;
-        exit(1);
+        return;
     }
 
     // For each class, traverse the AST and add
@@ -322,7 +324,7 @@ void ClassTable::type_check_method(method_class* current_method, class__class* c
     int formals_len = formals->len();
     for(int i = 0; i < formals_len; i++) {
         Symbol name = (static_cast<formal_class*>(formals->nth(i)))->get_name();
-        Symbol type = (static_cast<formal_class*>(formals->nth(i)))->get_name();
+        Symbol type = (static_cast<formal_class*>(formals->nth(i)))->get_type();
         symbol_table.addid(name, type);
     }
     
@@ -369,6 +371,7 @@ Symbol ClassTable::type_check_expression(Expression expr, class__class* current_
         break;
     case ExpressionType::new_:
         final_type = type_check_new_(static_cast<new__class*>(expr), current_class);
+        break;
     case ExpressionType::object:
         final_type = type_check_object(static_cast<object_class*>(expr), current_class);
         break;
