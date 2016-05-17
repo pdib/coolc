@@ -8,7 +8,7 @@ ARCHIVE_NEW= -cr
 RANLIB= gar -qs
 
 SRC= semant.cc semant.h cool-tree.h cool-tree.handcode.h good.cl bad.cl README
-CSRC= semant-phase.cc symtab_example.cc  handle_flags.cc  ast-lex.cc ast-parse.cc utilities.cc stringtab.cc dumptype.cc tree.cc cool-tree.cc
+CSRC= semant-phase.cc symtab_example.cc ast-parse.cc ast-lex.cc handle_flags.cc utilities.cc stringtab.cc dumptype.cc tree.cc cool-tree.cc
 TSRC= mycoolc mysemant cool-tree.aps
 CGEN=
 HGEN=

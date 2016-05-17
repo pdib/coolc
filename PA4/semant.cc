@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -10,8 +11,11 @@
 extern int semant_debug;
 extern char *curr_filename;
 
-#define LOG_ERROR(node) semant_error(); error_stream << "Error in file " << node->get_filename() \
-    << " at line " << node->get_line_number() << ": "
+#define LOG_ERROR(node)                                 \
+    semant_error();                                     \
+    error_stream                                        \
+    << node->get_filename()         \
+    << ":" << node->get_line_number() << ": "
 
 //////////////////////////////////////////////////////////////////////
 //
@@ -88,7 +92,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
     classes_table.enterscope();
     symbol_table.enterscope();
     method_table.enterscope();
-    install_basic_classes();
+    classes = install_basic_classes(classes);
 
     int classes_len = classes->len();
     
@@ -97,9 +101,15 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
         class__class* current_class = static_cast<class__class*>(classes->nth(i));
         class__class* previous_def = static_cast<class__class*>(
             classes_table.lookup(current_class->get_name()));
+        if (current_class->get_name() == SELF_TYPE) {
+            LOG_ERROR(current_class)
+                << "SELF_TYPE is an invalid name for a class." << endl;
+            return;
+        }
+
         if (previous_def != NULL) {
             LOG_ERROR(current_class)
-                << "Class " << current_class->get_name() << " is already defined.";
+                << "Class " << current_class->get_name() << " is already defined." <<endl;
             continue;
         }
         classes_table.addid(current_class->get_name(), current_class);
@@ -118,7 +128,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
                 is_inheritance_graph_valid = false;
                 LOG_ERROR(current_class)
                              << "Class " << current_class->get_name()
-                             << " inherits from " << parent_symbol
+                             << " cannot inherit class " << parent_symbol
                              << " which was not found."<< endl;
                 break;
             }
@@ -150,7 +160,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
                 is_inheritance_graph_valid = false;
                 break;
             }
-
+            
             if (!parent->has_child(current_class->get_name())) {
                 parent->children.push_back(current_class->get_name());
             }
@@ -160,18 +170,23 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
     }
 
     if (!is_inheritance_graph_valid) {
-        error_stream << "Invalid inheritance graph. Aborting compilation." << endl;
         return;
     }
 
     // For each class, traverse the AST and add
-    Class__class* root_class = classes_table.lookup(Object);
-    type_check_class(static_cast<class__class*>(root_class));
+    class__class* root_class = static_cast<class__class*>(classes_table.lookup(Object));
+    decl_class(root_class);
+    type_check_class(root_class);
     
     // Check for Main class presence and for main() method inside it
+    class__class* main_class = static_cast<class__class*>(classes_table.lookup(Main));
+    if (main_class == NULL) {
+        semant_error();
+        error_stream << "Class Main is not defined." << endl;
+    }
 }
 
-void ClassTable::type_check_class(class__class * current_class) {
+void ClassTable::decl_class(class__class * current_class) {
     Features features = current_class->get_features();
     int features_len = features->len();
     symbol_table.enterscope();
@@ -188,8 +203,19 @@ void ClassTable::type_check_class(class__class * current_class) {
             break;
         }
     }
-
     method_tables_by_classes.emplace(current_class->get_name(), method_table);
+    symbol_tables_by_classes.emplace(current_class->get_name(), symbol_table);
+
+    for(Symbol child: current_class->children) {
+        Class__class* child_class = classes_table.lookup(child);
+        decl_class(static_cast<class__class*>(child_class));
+    }
+    
+    method_table.exitscope();
+    symbol_table.exitscope();
+}
+
+void ClassTable::type_check_class(class__class* current_class) {
     Symbol class_name = current_class->get_name();
     bool should_type_check = class_name != Object &&
         class_name != Int &&
@@ -197,6 +223,10 @@ void ClassTable::type_check_class(class__class * current_class) {
         class_name != Bool &&
         class_name != IO;
     if (should_type_check) {
+        Features features = current_class->get_features();
+        int features_len = features->len();
+        symbol_table = symbol_tables_by_classes[class_name];
+        method_table = method_tables_by_classes[class_name];
         for (int i = 0; i < features_len; i++) {
             Feature feature = features->nth(i);
             switch (feature->feature_type()) {
@@ -215,9 +245,6 @@ void ClassTable::type_check_class(class__class * current_class) {
         Class__class* child_class = classes_table.lookup(child);
         type_check_class(static_cast<class__class*>(child_class));
     }
-
-    method_table.exitscope();
-    symbol_table.exitscope();
 }
 
 void ClassTable::decl_attr(attr_class* current_attr, class__class* current_class) {
@@ -227,6 +254,14 @@ void ClassTable::decl_attr(attr_class* current_attr, class__class* current_class
     if (attr_type != SELF_TYPE && type == NULL) {
         LOG_ERROR(current_class)
             << "Undeclared type " << attr_type << endl;
+        return;
+    }
+
+    // self is not allowed as an attribute name
+    if (current_attr->get_name() == self) {
+        LOG_ERROR(current_class)
+            << "Class" << current_class->get_name()
+            << " has an attribute named self, which is forbidden." << endl;
         return;
     }
     
@@ -257,6 +292,11 @@ void ClassTable::decl_method(method_class* current_method, class__class* current
     std::vector<Symbol> arg_names;
     for(int i = 0; i < formals_len; i++) {
         Symbol name = (static_cast<formal_class*>(formals->nth(i)))->get_name();
+        if (name == self) {
+            LOG_ERROR(current_class)
+                << "Method " << current_class->get_name() << "::" << current_method->get_name()
+                << "cannot bind self as a parameter." << endl;
+        }
         for (Symbol other_name : arg_names)  {
             if (name == other_name) {
                 LOG_ERROR(current_class)
@@ -295,13 +335,12 @@ void ClassTable::decl_method(method_class* current_method, class__class* current
         method_table.addid(current_method->get_name(), method_def);
     } else {
         for (MethodDeclaration def : *method_def) {
-            if (new_def.has_same_args(def)) {
-                if (def.return_type != new_def.return_type) {
+            // No overriding method with different arguments.
+            if (!new_def.has_same_args(def)) {
                     LOG_ERROR(current_class)
                         << "Class " << current_class->get_name()
                         << " is trying to redefine method " << current_method->get_name() << endl;
                     return;
-                }
             }
         }
     }
@@ -379,7 +418,8 @@ Symbol ClassTable::type_check_expression(Expression expr, class__class* current_
         final_type = type_check_let(static_cast<let_class*>(expr), current_class);
         break;
     case ExpressionType::eq:
-        TYPE_CHECK_ARITH_EXPR(expr, eq_class, Bool, Int);
+        final_type = Bool;
+        type_check_eq(static_cast<eq_class*>(expr), current_class);
         break;
     case ExpressionType::lt:
         TYPE_CHECK_ARITH_EXPR(expr, lt_class, Bool, Int);
@@ -432,14 +472,28 @@ Symbol ClassTable::type_check_expression(Expression expr, class__class* current_
         break;
     }
 
-    // What about No_type ?
-    if (!is_descendant(final_type, expected_type)) {
+    // Don't check No_type.
+    if (No_type != final_type && !is_descendant(final_type, expected_type, current_class)) {
         LOG_ERROR(current_class)
             << "Cannot convert from " << final_type << " to " << expected_type << endl;
         final_type = Object;
     }
     expr->type = final_type;
     return final_type;
+}
+
+bool invalid_comparison(Symbol a, Symbol b) {
+    bool has_basic_type = a == Int || a == Str || a == Bool;
+    return has_basic_type  && a != b;
+}
+
+void ClassTable::type_check_eq(eq_class* eq, class__class* current_class) {
+    Symbol left_type = type_check_expression(eq->get_left_operand(), current_class, Object);
+    Symbol right_type = type_check_expression(eq->get_right_operand(), current_class, Object);
+    if (invalid_comparison(left_type, right_type) || invalid_comparison(right_type, left_type)) {
+            LOG_ERROR(current_class)
+                << "Illegal comparison between " << left_type << " and " << right_type << endl;
+    }
 }
 
 Symbol ClassTable::type_check_assign(assign_class* assign, class__class* current_class) {
@@ -510,25 +564,42 @@ Symbol ClassTable::handle_dispatch(
     for (int i = 0; i < arguments->len(); i++) {
         Expression arg = arguments->nth(i);
         Symbol arg_type = type_check_expression(arg, current_class, Object);
+        if (arg_type == SELF_TYPE) {
+            arg_type = current_class->get_name();
+        }
         args.push_back(arg_type);
     }
 
+    if (dispatch_type == SELF_TYPE) {
+        dispatch_type = current_class->get_name();
+    }
+    
     if (method_tables_by_classes.find(dispatch_type) == std::end(method_tables_by_classes))  {
         LOG_ERROR(current_class)
             << "Undefined method call: " << dispatch_type << "::" << name << endl;
         return Object;
     }
-
-    MethodDeclarations method_decls = method_tables_by_classes[dispatch_type].lookup(name);
+    SymbolTable<Symbol, MethodDeclarations_> table = method_tables_by_classes[dispatch_type];
+    MethodDeclarations method_decls = table.lookup(name);
+    
     if (method_decls == NULL) {
         LOG_ERROR(current_class)
             << "Undefined method call: " << dispatch_type << "::" << name << endl;
         return Object;
     }
 
+    class__class* dispatch_class = static_cast<class__class*>(classes_table.lookup(dispatch_type));
     Symbol return_type = nullptr;
     for (MethodDeclaration current_decl : *method_decls) {
-        if (current_decl.matches(args)) {
+        bool matches = true;
+        for (size_t i = 0; i < args.size(); i++) {
+            if (!is_descendant(args[i], current_decl.argument_types[i], dispatch_class)) {
+                matches = false;
+                break;
+            }
+        }
+
+        if (matches) {
             return_type = current_decl.return_type;
             break;
         }
@@ -537,14 +608,14 @@ Symbol ClassTable::handle_dispatch(
     if (return_type == nullptr) {
         LOG_ERROR(current_class)
             << "No matching declaration found for " << name
-            << " with argument types (";
+            << " with argument types ( ";
         for(Symbol type : args) {
             error_stream << type << " ";
         }
         error_stream << ")" << endl;
         return_type = Object;
     }
-    
+
     return return_type;   
 }
 
@@ -587,6 +658,7 @@ Symbol ClassTable::type_check_typcase(typcase_class* typcase, class__class* curr
     type_check_expression(typcase->get_expression(), current_class, Object);
     Cases cases = typcase->get_cases();
     Symbol return_type = nullptr;
+    std::vector<Symbol> branches_types;
     for (int i = 0 ; i < cases->len() ; i++) {
         branch_class* branch = static_cast<branch_class*>(cases->nth(i));
         Symbol identifier = branch->get_name();
@@ -595,8 +667,14 @@ Symbol ClassTable::type_check_typcase(typcase_class* typcase, class__class* curr
         if (type_ptr == NULL) {
             LOG_ERROR(current_class)
                 << "Undefined type in case branch " << type << endl;
-            type = Object;
+            continue;
         }
+        if (std::find(begin(branches_types), end(branches_types), type) != end(branches_types)) {
+            LOG_ERROR(current_class)
+                << "Several branches with the type " << type << endl;
+            continue;
+        }
+        branches_types.push_back(type);
         symbol_table.enterscope();
         symbol_table.addid(identifier, type);
         Symbol branch_type = type_check_expression(branch->get_expression(), current_class, Object);
@@ -619,7 +697,7 @@ Symbol ClassTable::type_check_block(block_class*  block, class__class* current_c
 
 Symbol ClassTable::type_check_object(object_class* object, class__class* current_class) {
     if (object->get_name() == self) {
-        return current_class->get_name();
+        return SELF_TYPE;
     }
     Symbol type = symbol_table.lookup(object->get_name());
     if (type == NULL) {
@@ -635,9 +713,15 @@ Symbol ClassTable::type_check_let(let_class* let, class__class* current_class) {
     Symbol type = let->get_type();
     class__class* type_ptr = static_cast<class__class*>(classes_table.lookup(type));
     Symbol identifier = let->get_identifier();
-    if (type_ptr == NULL) {
+    //  SELF_TYPE is allowed as a let binding
+    if (type != SELF_TYPE && type_ptr == NULL) {
         LOG_ERROR(current_class)
             << "Undefined type in let binding " << type << endl;
+        return Object;
+    }
+    if (identifier == self) {
+        LOG_ERROR(current_class)
+            << "Trying to bind self in let binding" << endl;
         return Object;
     }
     symbol_table.addid(identifier, type);
@@ -649,7 +733,7 @@ Symbol ClassTable::type_check_let(let_class* let, class__class* current_class) {
 
 Symbol ClassTable::type_check_new_(new__class* new_, class__class* current_class) {
     if (new_->get_type() == SELF_TYPE) {
-        return current_class->get_name();
+        return SELF_TYPE;
     }
     Symbol type = new_->get_type();
     class__class* type_ptr = static_cast<class__class*>(classes_table.lookup(type));
@@ -666,8 +750,13 @@ void ClassTable::type_check_loop(loop_class* loop, class__class* current_class) 
     type_check_expression(loop->get_body(), current_class, Object);
 }
 
-bool ClassTable::is_descendant(Symbol desc, Symbol ancestor) {
-    // What about SELF_TYPE ?
+bool ClassTable::is_descendant(Symbol desc, Symbol ancestor, class__class* current_class) {
+    if (desc == ancestor) {
+        return true;
+    }
+    if (desc == SELF_TYPE) {
+        desc = current_class->get_name();
+    }
     class__class *current_type = static_cast<class__class*>(classes_table.lookup(desc));
     while (current_type != NULL) {
         if (current_type->get_name()  == ancestor) {
@@ -680,7 +769,7 @@ bool ClassTable::is_descendant(Symbol desc, Symbol ancestor) {
     return false;
 }
 
-void ClassTable::install_basic_classes() {
+Classes ClassTable::install_basic_classes(Classes classes) {
     // The tree package uses these globals to annotate the classes built below.
    // curr_lineno  = 0;
     Symbol filename = stringtable.add_string("<basic class>");
@@ -779,11 +868,19 @@ void ClassTable::install_basic_classes() {
 						      no_expr()))),
 	       filename);
 
-    classes_table.addid(Object, Object_class);
-    classes_table.addid(IO, IO_class);
-    classes_table.addid(Int, Int_class);
-    classes_table.addid(Bool, Bool_class);
-    classes_table.addid(Str, Str_class);
+    classes_table.addid(prim_slot, class_(prim_slot, NULL, nil_Features(), filename));
+
+    return append_Classes(
+        single_Classes(Object_class),
+        append_Classes(
+            single_Classes(IO_class),
+            append_Classes(
+                single_Classes(Int_class),
+                append_Classes(
+                    single_Classes(Bool_class),
+                    append_Classes(
+                        single_Classes(Str_class),
+                        classes)))));
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -828,7 +925,7 @@ ostream& ClassTable::semant_error()
         (see `tree.h')
 
      You are free to first do 1), make sure you catch all semantic
-     errors. Part 2) can be done in a second stage, when you want
+     errors. Part 2)  be done in a second stage, when you want
      to build mycoolc.
  */
 void program_class::semant()

@@ -4,30 +4,30 @@
 *
 */
 %{
-  #include <iostream>
-  #include "cool-tree.h"
-  #include "stringtab.h"
-  #include "utilities.h"
+#include <iostream>
+#include "cool-tree.h"
+#include "stringtab.h"
+#include "utilities.h"
   
-  extern char *curr_filename;
+    extern char *curr_filename;
   
   
-  /* Locations */
-  #define YYLTYPE int              /* the type of locations */
-  #define cool_yylloc curr_lineno  /* use the curr_lineno from the lexer
-  for the location of tokens */
+    /* Locations */
+#define YYLTYPE int              /* the type of locations */
+#define cool_yylloc curr_lineno  /* use the curr_lineno from the lexer
+                                    for the location of tokens */
     
     extern int node_lineno;          /* set before constructing a tree node
-    to whatever you want the line number
-    for the tree node to be */
+                                        to whatever you want the line number
+                                        for the tree node to be */
       
       
-      #define YYLLOC_DEFAULT(Current, Rhs, N)         \
-      Current = Rhs[1];                             \
-      node_lineno = Current;
+#define YYLLOC_DEFAULT(Current, Rhs, N)               \
+    Current = Rhs[1];                                 \
+    node_lineno = Current;
     
     
-    #define SET_NODELOC(Current)  \
+#define SET_NODELOC(Current)                    \
     node_lineno = Current;
     
     /* IMPORTANT NOTE ON LINE NUMBERS
@@ -157,127 +157,135 @@
     /* 
     Save the root of the abstract syntax tree in a global variable.
     */
-    program	: class_list	
+program	: class_list	
     { 
       @$ = @1; ast_root = program($1); 
     }
     ;
     
-    class_list : class ';'		/* single class */
+class_list : class ';'		/* single class */
     { 
-      $$ = single_Classes($1);
-      parse_results = $$; 
+        SET_NODELOC(@1);
+        $$ = single_Classes($1);
+        parse_results = $$; 
     }
-               | class_list  class ';'	/* several classes */
+    | class_list  class ';'	/* several classes */
     { 
-      $$ = append_Classes($1,single_Classes($2)); 
-      parse_results = $$; 
+        SET_NODELOC(@2);
+        $$ = append_Classes($1,single_Classes($2)); 
+        parse_results = $$; 
     }
-| class_list error ';'
-
+    | class_list error ';'
     ;
     
     /* If no parent is specified, the class inherits from the Object class. */
-    class	: CLASS TYPEID '{' optional_feature_list '}' 
+class	: CLASS TYPEID '{' optional_feature_list '}' 
     { 
+        SET_NODELOC(@1);
         $$ = class_($2,idtable.add_string("Object"),$4,
-		  stringtable.add_string(curr_filename)); 
+                    stringtable.add_string(curr_filename)); 
     }
-                | CLASS TYPEID INHERITS TYPEID '{' optional_feature_list '}' 
+    | CLASS TYPEID INHERITS TYPEID '{' optional_feature_list '}' 
     {
-      $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); 
+        SET_NODELOC(@1);
+        $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); 
     }
-| error
+    | error
     ;
 
 optional_feature_list: %empty { $$ = nil_Features(); }
-| feature_list
-;
-
-    /* Feature list may be empty, but no empty features in list. */
-feature_list: feature ';'  { $$ = single_Features($1); }
-| feature_list feature ';' { $$ = append_Features($1, single_Features($2)); }
-| feature_list error ';'
-| error  { $$ = nil_Features(); }
+    | feature_list
     ;
 
-feature: OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}' { $$ = method($1, $3, $6, $8); }
-| declaration { $$ = $1; }
+/* Feature list may be empty, but no empty features in list. */
+feature_list: feature ';'  { SET_NODELOC(@1); $$ = single_Features($1); }
+    | feature_list feature ';' { SET_NODELOC(@2); $$ = append_Features($1, single_Features($2)); }
+    | feature_list error ';'
+    | error  { $$ = nil_Features(); }
     ;
 
-    formal_list: formal { $$ = single_Formals($1); }
-| formal_list ',' formal { $$ = append_Formals($1, single_Formals($3)); }
-| %empty { $$ = nil_Formals(); }
-| formal_list ',' error
+feature: OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}' { SET_NODELOC(@1); $$ = method($1, $3, $6, $8); }
+    | declaration { SET_NODELOC(@1); $$ = $1; }
     ;
 
-    formal: OBJECTID ':' TYPEID { $$ = formal($1, $3); }
-
-expression_block: expression ';' { $$ = single_Expressions($1); }
-               | expression_block  expression  ';' { $$ = append_Expressions($1, single_Expressions($2)); }
-               | expression_block error ';'
-               | error { $$ = nil_Expressions(); }
-;
-
-    expression_list: expression { $$ = single_Expressions($1); }
-| expression_list ',' expression { $$ = append_Expressions($1, single_Expressions($3)); }
-| %empty { $$ = nil_Expressions(); }
-| expression_list ',' error
-| error { $$ = nil_Expressions(); }
+formal_list: formal { $$ = single_Formals($1); }
+    | formal_list ',' formal { SET_NODELOC(@3); $$ = append_Formals($1, single_Formals($3)); }
+    | %empty { $$ = nil_Formals(); }
+    | formal_list ',' error
     ;
 
-declaration_list: declaration { $$ = single_Features($1); }
-| declaration_list ',' declaration { $$ = append_Features($1, single_Features($3)) ;}
-| declaration_list ',' error
-| error { $$ = nil_Features(); }
-;
-declaration: OBJECTID ':' TYPEID { $$ = attr($1, $3, no_expr()); }               
-| OBJECTID ':' TYPEID ASSIGN expression { $$ = attr($1, $3, $5); }
-	       ;
+formal: OBJECTID ':' TYPEID { SET_NODELOC(@1); $$ = formal($1, $3); }
 
-    case_list: case_ ';' { $$ = single_Cases($1); }
-             | case_list case_ ';' { $$ = append_Cases($1, single_Cases($2)); }
-| case_list error ';'
+expression_block: expression ';' { SET_NODELOC(@1); $$ = single_Expressions($1); }
+    | expression_block  expression  ';' { SET_NODELOC(@2); $$ = append_Expressions($1, single_Expressions($2)); }
+    | expression_block error ';'
+    | error { $$ = nil_Expressions(); }
+    ;
+
+expression_list: expression { SET_NODELOC(@1); $$ = single_Expressions($1); }
+    | expression_list ',' expression { SET_NODELOC(@1); $$ = append_Expressions($1, single_Expressions($3)); }
+    | %empty { $$ = nil_Expressions(); }
+    | expression_list ',' error
+    | error { $$ = nil_Expressions(); }
+    ;
+
+declaration_list: declaration { SET_NODELOC(@1); $$ = single_Features($1); }
+    | declaration_list ',' declaration { SET_NODELOC(@1); $$ = append_Features($1, single_Features($3)) ;}
+    | declaration_list ',' error
+    | error { $$ = nil_Features(); }
+    ;
+
+declaration: OBJECTID ':' TYPEID { SET_NODELOC(@1); $$ = attr($1, $3, no_expr()); }               
+    | OBJECTID ':' TYPEID ASSIGN expression { SET_NODELOC(@1); $$ = attr($1, $3, $5); }
+    ;
+
+case_list: case_ ';' { SET_NODELOC(@1); $$ = single_Cases($1); }
+    |  case_list case_ ';' { SET_NODELOC(@1); $$ = append_Cases($1, single_Cases($2)); }
+    | case_list error ';'
+    ;  
+
+case_   : OBJECTID ':' TYPEID DARROW expression  { SET_NODELOC(@1); $$ = branch($1, $3, $5); }
 ;
 
-    case_   : OBJECTID ':' TYPEID DARROW expression  { $$ = branch($1, $3, $5); }
-;
-    expression: OBJECTID ASSIGN expression { $$ =  assign($1, $3); }
-| expression '@' TYPEID '.' OBJECTID '(' expression_list ')' { $$ = static_dispatch($1, $3, $5, $7); }
-              | expression '.' OBJECTID '(' expression_list ')' { $$ = dispatch($1, $3, $5); }
-| OBJECTID '(' expression_list ')'
-{
-    $$ = dispatch(object(self), $1, $3);
-}
-              | IF expression THEN expression ELSE expression FI { $$ = cond($2, $4, $6); } 
-              | WHILE expression LOOP expression POOL { $$ = loop($2, $4); }
-              | '{' expression_block '}' { $$ = block($2); }
-| LET declaration_list IN expression {
-    int len = $2->len();
-    Expression expr = $4;
-    for (int i = len - 1; i >= 0 ; i--) {
-        attr_class* declaration = static_cast<attr_class*>($2->nth(i));
-        expr = let(declaration->name, declaration->type_decl, declaration->init, expr);
+expression: OBJECTID ASSIGN expression { SET_NODELOC(@1); $$ =  assign($1, $3); }
+    | expression '@' TYPEID '.' OBJECTID '(' expression_list ')' { SET_NODELOC(@1); $$ = static_dispatch($1, $3, $5, $7); }
+    | expression '.' OBJECTID '(' expression_list ')' { SET_NODELOC(@1); $$ = dispatch($1, $3, $5); }
+    | OBJECTID '(' expression_list ')'
+    {
+        SET_NODELOC(@1);
+        $$ = dispatch(object(self), $1, $3);
     }
-    $$ = expr;
- }
-              | CASE expression OF case_list ESAC { $$ = typcase($2, $4); }
-              | NEW TYPEID                    { $$ = new_($2); }
-              | ISVOID expression             { $$ = isvoid($2); }
-              | expression '*' expression     { $$ = mul($1, $3); }
-              | expression '/' expression     { $$ = divide($1, $3); }
-              | expression '+' expression     { $$ = plus($1, $3); }
-              | expression '-' expression     { $$ = sub($1, $3); }
-              | '~' expression                { $$ = neg($2); }
-              | expression '<' expression     { $$ = lt($1, $3); }
-              | expression LE expression      { $$ = leq($1, $3); }
-              | expression '=' expression     { $$ = eq($1, $3); }
-              | NOT expression                { $$ = comp($2); }
-              | '(' expression ')'	      { $$ = $2; }
-              | OBJECTID                      { $$ = object($1); } 
-              | STR_CONST                     { $$ = string_const($1);}
-              | INT_CONST                     { $$ = int_const($1); }
-              | BOOL_CONST                    { $$ = bool_const($1); }
+    | IF expression THEN expression ELSE expression FI { SET_NODELOC(@1); $$ = cond($2, $4, $6); } 
+    | WHILE expression LOOP expression POOL { SET_NODELOC(@1); $$ = loop($2, $4); }
+    | '{' expression_block '}' { SET_NODELOC(@1); $$ = block($2); }
+    | LET declaration_list IN expression
+    {
+        SET_NODELOC(@1);
+        int len = $2->len();
+        Expression expr = $4;
+        for (int i = len - 1; i >= 0 ; i--) {
+            attr_class* declaration = static_cast<attr_class*>($2->nth(i));
+            expr = let(declaration->name, declaration->type_decl, declaration->init, expr);
+        }
+        $$ = expr;
+    }
+    | CASE expression OF case_list ESAC { SET_NODELOC(@1); $$ = typcase($2, $4); }
+    | NEW TYPEID                    { SET_NODELOC(@1); $$ = new_($2); }
+    | ISVOID expression             { SET_NODELOC(@1); $$ = isvoid($2); }
+    | expression '*' expression     { SET_NODELOC(@1); $$ = mul($1, $3); }
+    | expression '/' expression     { SET_NODELOC(@1); $$ = divide($1, $3); }
+    | expression '+' expression     { SET_NODELOC(@1); $$ = plus($1, $3); }
+    | expression '-' expression     { SET_NODELOC(@1); $$ = sub($1, $3); }
+    | '~' expression                { SET_NODELOC(@1); $$ = neg($2); }
+    | expression '<' expression     { SET_NODELOC(@1); $$ = lt($1, $3); }
+    | expression LE expression      { SET_NODELOC(@1); $$ = leq($1, $3); }
+    | expression '=' expression     { SET_NODELOC(@1); $$ = eq($1, $3); }
+    | NOT expression                { SET_NODELOC(@1); $$ = comp($2); }
+    | '(' expression ')'	      { SET_NODELOC(@1); $$ = $2; }
+    | OBJECTID                      { SET_NODELOC(@1); $$ = object($1); } 
+    | STR_CONST                     { SET_NODELOC(@1); $$ = string_const($1);}
+    | INT_CONST                     { SET_NODELOC(@1); $$ = int_const($1); }
+    | BOOL_CONST                    { SET_NODELOC(@1); $$ = bool_const($1); }
     ;
     /* end of grammar */
     %%
