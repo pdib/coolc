@@ -645,11 +645,13 @@ Symbol ClassTable::type_union(Symbol t1, Symbol t2, class__class* current_class)
     t2_heritance_stack.pop();
     Symbol common_type = head_type_t1;
     while (head_type_t2 == head_type_t1 && !t1_heritance_stack.empty() && !t2_heritance_stack.empty()) {
-        common_type = head_type_t1;
          head_type_t1 = t1_heritance_stack.top();
          t1_heritance_stack.pop();
          head_type_t2 = t2_heritance_stack.top();
          t2_heritance_stack.pop();
+         if (head_type_t2 == head_type_t1) {
+             common_type = head_type_t1;
+         }
     }
     return common_type;
 }
