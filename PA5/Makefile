@@ -1,7 +1,7 @@
 
 ASSN = 5
 CLASS= cs143
-CLASSDIR= /usr/class/cs143/cool
+CLASSDIR= ../.
 LIB= -lfl
 AR= gar
 ARCHIVE_NEW= -cr
@@ -31,6 +31,8 @@ FLEX=flex ${FFLAGS}
 BISON= bison ${BFLAGS}
 DEPEND = ${CC} -MM ${CPPINCLUDE}
 
+all: cgen
+
 source: ${SRC} ${TSRC} ${LIBS} lsource
 
 lsource: ${LSRC}
@@ -54,7 +56,7 @@ compile:	cgen change-prot
 change-prot:
 	@-chmod 660 ${SRC} ${OUTPUT}
 
-cgen:	${OBJS} parser semant
+cgen:	${OBJS} ${LIBS}
 	${CC} ${CFLAGS} ${OBJS} ${LIB} -o cgen
 
 .cc.o:
@@ -64,24 +66,14 @@ dotest:	cgen example.cl
 	@echo "\nRunning code generator on example.cl\n"
 	-./mycoolc example.cl
 
-${LIBS}:
-	${CLASSDIR}/etc/link-object ${ASSN} $@
+lexer:
+	cp ${CLASSDIR}/PA2/lexer lexer
 
+parser:
+	cp ${CLASSDIR}/PA3/parser parser
 
-# These dependencies allow you to get the starting files for
-# the assignment.  They will not overwrite a file you already have.
-
-${SRC} :								
-	-${CLASSDIR}/etc/copy-skel ${ASSN} ${SRC}
-
-${LSRC} :
-	-${CLASSDIR}/etc/link-shared ${ASSN} ${LSRC}
-
-${TSRC} ${CSRC}:
-	-ln -s ${CLASSDIR}/src/PA${ASSN}/$@ $@
-
-${HSRC}:
-	-ln -s ${CLASSDIR}/include/PA${ASSN}/$@ $@
+semant:
+	cp ${CLASSDIR}/PA4/semant semant
 
 clean :
 	-rm -f ${OUTPUT} *.s core ${OBJS} cgen parser semant lexer *~ *.a *.o
