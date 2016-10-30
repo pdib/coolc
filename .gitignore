@@ -17,3 +17,6 @@ cool-parse.cc
 *.TMP
 *.s
 
+*.VC.DB*
+test_runner
+out
