@@ -3,7 +3,17 @@
     as possible.
  *)
 
+class A {
+  foo(): Int {{ 1337 /2 ;1337 + 2; }};
+};
+
+class B inherits A {
+  b: Int <- 5;
+};
+
 class Main {
-  main():Int { 0 };
+  bar(): String { "Hello world" };
+  foo(): Bool { false };
+  main(): Int { 0 };
 };
 

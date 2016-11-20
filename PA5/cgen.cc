@@ -22,6 +22,9 @@
 //
 //**************************************************************
 
+#include <stack>
+#include <iostream>
+#include <sstream>
 #include "cgen.h"
 #include "cgen_gc.h"
 
@@ -242,8 +245,9 @@ static void emit_disptable_ref(Symbol sym, ostream& s)
 static void emit_init_ref(Symbol sym, ostream& s)
 { s << sym << CLASSINIT_SUFFIX; }
 
-static void emit_label_ref(int l, ostream &s)
-{ s << "label" << l; }
+template<typename T>
+static void emit_label_ref(T l, ostream &s)
+{ s /*<< "label"*/ << l; }
 
 static void emit_protobj_ref(Symbol sym, ostream& s)
 { s << sym << PROTOBJ_SUFFIX; }
@@ -251,7 +255,8 @@ static void emit_protobj_ref(Symbol sym, ostream& s)
 static void emit_method_ref(Symbol classname, Symbol methodname, ostream& s)
 { s << classname << METHOD_SEP << methodname; }
 
-static void emit_label_def(int l, ostream &s)
+template<typename T>
+static void emit_label_def(T l, ostream &s)
 {
   emit_label_ref(l,s);
   s << ":" << endl;
@@ -394,20 +399,19 @@ void StringEntry::code_def(ostream& s, int stringclasstag)
   IntEntryP lensym = inttable.add_int(len);
 
   // Add -1 eye catcher
-  s << WORD << "-1" << endl;
+  // s << WORD << "-1" << endl;
 
   code_ref(s);  s  << LABEL                                             // label
       << WORD << stringclasstag << endl                                 // tag
-      << WORD << (DEFAULT_OBJFIELDS + STRING_SLOTS + (len+4)/4) << endl // size
-      << WORD;
-
-
- /***** Add dispatch information for class String ******/
-
-      s << endl;                                              // dispatch table
-      s << WORD;  lensym->code_ref(s);  s << endl;            // string length
-  emit_string_constant(s,str);                                // ascii string
-  s << ALIGN;                                                 // align to word
+      
+      << WORD 
+      << (DEFAULT_OBJFIELDS + STRING_SLOTS + (len + WORD_SIZE) / WORD_SIZE) // size 
+      << endl 
+      
+      << WORD << 0 << endl // dispatch table
+      << WORD;  lensym->code_ref(s);  s << endl;            // string length
+      emit_string_constant(s,str);                                // ascii string
+      s << ALIGN;                                                 // align to word
 }
 
 //
@@ -437,17 +441,13 @@ void IntEntry::code_ref(ostream &s)
 void IntEntry::code_def(ostream &s, int intclasstag)
 {
   // Add -1 eye catcher
-  s << WORD << "-1" << endl;
+  // s << WORD << "-1" << endl;
 
   code_ref(s);  s << LABEL                                // label
       << WORD << intclasstag << endl                      // class tag
       << WORD << (DEFAULT_OBJFIELDS + INT_SLOTS) << endl  // object size
-      << WORD; 
-
- /***** Add dispatch information for class Int ******/
-
-      s << endl;                                          // dispatch table
-      s << WORD << str << endl;                           // integer value
+      << WORD << 0 << endl // dispatch table
+      << WORD << str << endl;                           // integer value
 }
 
 
@@ -481,17 +481,13 @@ void BoolConst::code_ref(ostream& s) const
 void BoolConst::code_def(ostream& s, int boolclasstag)
 {
   // Add -1 eye catcher
-  s << WORD << "-1" << endl;
+  // s << WORD << "-1" << endl;
 
   code_ref(s);  s << LABEL                                  // label
       << WORD << boolclasstag << endl                       // class tag
       << WORD << (DEFAULT_OBJFIELDS + BOOL_SLOTS) << endl   // object size
-      << WORD;
-
- /***** Add dispatch information for class Bool ******/
-
-      s << endl;                                            // dispatch table
-      s << WORD << val << endl;                             // value (0 or 1)
+      << WORD << 0 << endl // dispatch table
+      << WORD << val << endl;                             // value (0 or 1)
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -619,8 +615,8 @@ void CgenClassTable::code_constants()
 
 CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 {
-   stringclasstag = 0 /* Change to your String class tag here */;
-   intclasstag =    0 /* Change to your Int class tag here */;
+   stringclasstag = 2 /* Change to your String class tag here */;
+   intclasstag =    1 /* Change to your Int class tag here */;
    boolclasstag =   0 /* Change to your Bool class tag here */;
 
    enterscope();
@@ -834,6 +830,9 @@ void CgenClassTable::code()
 //                   - dispatch tables
 //
 
+  root()->register_node();
+
+  root()->code(str);
   if (cgen_debug) cout << "coding global text" << endl;
   code_global_text();
 
@@ -845,17 +844,19 @@ void CgenClassTable::code()
 }
 
 
+
 CgenNodeP CgenClassTable::root()
 {
    return probe(Object);
 }
-
 
 ///////////////////////////////////////////////////////////////////////
 //
 // CgenNode methods
 //
 ///////////////////////////////////////////////////////////////////////
+
+int CgenNode::Classtags = 3;
 
 CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    class__class((const class__class &) *nd),
@@ -866,6 +867,79 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    stringtable.add_string(name->get_string());          // Add class name to string table
 }
 
+void CgenNode::register_node() {
+    //cout << name <<" " << classtag << endl;
+
+    for (int n = 0; n < features->len(); n++) {
+      auto attr = dynamic_cast<attr_class*>(features->nth(n));
+      if (attr) {
+        register_attribute(attr->name);
+      }
+
+      auto method = dynamic_cast<method_class*>(features->nth(n));
+      if (method) {
+        register_method(method);
+      }
+    }
+
+    for (
+      List<CgenNode> *childs = get_children();
+      childs != nullptr;
+      childs = childs->tl()) {
+        auto* child = childs->hd();
+        //cout << "\t" << child->name << " " << child->classtag << endl;
+        child->register_node();
+    }
+}
+
+void CgenNode::register_attribute(Symbol name) {
+  offsets.emplace(name, ++size);
+}
+
+void CgenNode::register_method(method_class* method) {
+  std::stringstream s;
+  s << this->name << "." << method->name;
+  methods.emplace(s.str(), method);
+}
+
+void CgenNode::code(ostream& str) {
+    this->emit_init_def(str);
+
+    for (auto const& method: this->methods) {
+      this->emit_method_def(str, method.first, method.second);
+    }
+
+    for (
+      List<CgenNode> *childs = get_children();
+      childs != nullptr;
+      childs = childs->tl()) {
+        childs->hd()->code(str);
+    }
+}
+
+void CgenNode::emit_method_def(ostream& str, std::string const& label, method_class* method) {
+  cout << "Emitting code for " << label << endl;
+  emit_label_def(label, str);
+
+  // emit code for new stack frame
+
+  // emit code for block
+  method->expr->code(str);
+
+  // emit return code
+  emit_return(str);
+}
+
+void CgenNode::emit_init_def(ostream& str) {
+  std::stringstream s;
+  s << this->name << CLASSINIT_SUFFIX;
+  cout << "Emitting code for init method " << s.str() << endl;
+  emit_label_def(s.str(), str);
+
+
+
+  emit_return(str);
+}
 
 //******************************************************************
 //
@@ -896,21 +970,40 @@ void typcase_class::code(ostream &s) {
 }
 
 void block_class::code(ostream &s) {
+  for (int i = body->first(); i < body->len(); i++) {
+    body->nth(i)->code(s);
+  }
 }
 
 void let_class::code(ostream &s) {
 }
 
 void plus_class::code(ostream &s) {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+  emit_add(ACC, T1, ACC, s);
 }
 
 void sub_class::code(ostream &s) {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+  emit_sub(ACC, T1, ACC, s);
 }
 
 void mul_class::code(ostream &s) {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+  emit_mul(ACC, T1, ACC, s);
 }
 
 void divide_class::code(ostream &s) {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+  emit_div(ACC, T1, ACC, s);
 }
 
 void neg_class::code(ostream &s) {

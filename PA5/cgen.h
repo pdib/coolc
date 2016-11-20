@@ -3,6 +3,7 @@
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
+#include <unordered_map>
 
 enum Basicness     {Basic, NotBasic};
 #define TRUE 1
@@ -50,13 +51,8 @@ public:
 
 
 class CgenNode : public class__class {
-private: 
-   CgenNodeP parentnd;                        // Parent of class
-   List<CgenNode> *children;                  // Children of class
-   Basicness basic_status;                    // `Basic' if class is basic
-                                              // `NotBasic' otherwise
-
 public:
+   static int Classtags;
    CgenNode(Class_ c,
             Basicness bstatus,
             CgenClassTableP class_table);
@@ -66,6 +62,26 @@ public:
    void set_parentnd(CgenNodeP p);
    CgenNodeP get_parentnd() { return parentnd; }
    int basic() { return (basic_status == Basic); }
+   
+   CgenNodeP parentnd;                        // Parent of class
+   List<CgenNode> *children;                  // Children of class
+   Basicness basic_status;                    // `Basic' if class is basic
+                                              // `NotBasic' otherwise
+   
+   void code(ostream& str);
+   void emit_method_def(ostream& str, std::string const& label, method_class* method);
+
+   void register_node();
+   void register_attribute(Symbol name);
+   void register_method(method_class* method);
+
+   void emit_init_def(ostream& str);
+
+   int size = 3;
+   std::unordered_map<Symbol, int> offsets;
+   std::unordered_map<std::string, method_class*> methods;
+   int classtag = CgenNode::Classtags++;
+   bool visited = false;  
 };
 
 class BoolConst 
