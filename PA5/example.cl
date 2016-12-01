@@ -4,16 +4,18 @@
  *)
 
 class A {
-  foo(): Int {{ 1337 /2 ;1337 + 2; }};
+  bar(a: Int): Int {{ 1337 /2 ;1337 + 2; a;}};
+  foo(a: Int): Int {{ 1337 /2 ;1337 + 2; a;}};
 };
 
 class B inherits A {
   b: Int <- 5;
+  bar(a: Int): Int {{ 0; }};
 };
 
 class Main {
   bar(): String { "Hello world" };
   foo(): Bool { false };
-  main(): Int { 0 };
+  main(): Int { (new A).foo(55) };
 };
 

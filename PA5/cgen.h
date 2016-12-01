@@ -4,6 +4,7 @@
 #include "cool-tree.h"
 #include "symtab.h"
 #include <unordered_map>
+#include <vector>
 
 enum Basicness     {Basic, NotBasic};
 #define TRUE 1
@@ -71,7 +72,7 @@ public:
    void code(ostream& str);
    void emit_method_def(ostream& str, std::string const& label, method_class* method);
 
-   void register_node();
+   void register_node(ostream& str);
    void register_attribute(Symbol name);
    void register_method(method_class* method);
 
@@ -79,6 +80,7 @@ public:
 
    int size = 3;
    std::unordered_map<Symbol, int> offsets;
+   std::vector<std::string> method_offsets;
    std::unordered_map<std::string, method_class*> methods;
    int classtag = CgenNode::Classtags++;
    bool visited = false;  

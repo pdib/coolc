@@ -560,7 +560,8 @@ void CgenClassTable::code_global_text()
   emit_init_ref(idtable.add_string("Bool"),str);
   str << endl << GLOBAL;
   emit_method_ref(idtable.add_string("Main"), idtable.add_string("main"), str);
-  str << endl;
+  str << endl << GLOBAL;
+  str << "main" << endl;
 }
 
 void CgenClassTable::code_bools(int boolclasstag)
@@ -830,12 +831,12 @@ void CgenClassTable::code()
 //                   - dispatch tables
 //
 
-  root()->register_node();
+  root()->register_node(str);
 
-  root()->code(str);
   if (cgen_debug) cout << "coding global text" << endl;
   code_global_text();
 
+  root()->code(str);
 //                 Add your code to emit
 //                   - object initializer
 //                   - the class methods
@@ -867,8 +868,10 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    stringtable.add_string(name->get_string());          // Add class name to string table
 }
 
-void CgenNode::register_node() {
-    //cout << name <<" " << classtag << endl;
+void CgenNode::register_node(ostream& str) {
+    // get the parent dispatch table
+    // this is to guarantee the child class has the same offsets in the dispatch table as its parent.
+    this->method_offsets = this->get_parentnd()->method_offsets;
 
     for (int n = 0; n < features->len(); n++) {
       auto attr = dynamic_cast<attr_class*>(features->nth(n));
@@ -882,13 +885,16 @@ void CgenNode::register_node() {
       }
     }
 
-    for (
-      List<CgenNode> *childs = get_children();
-      childs != nullptr;
-      childs = childs->tl()) {
-        auto* child = childs->hd();
-        //cout << "\t" << child->name << " " << child->classtag << endl;
-        child->register_node();
+    // emit dispatch table
+    std::stringstream s;
+    s << this->name << "_dispatch_table";
+    emit_label_def(s.str(), str);
+    for (auto method_name : method_offsets) {
+      str << WORD << method_name << endl;        
+    }
+
+    for (auto childs = get_children(); childs; childs = childs->tl()) {
+      childs->hd()->register_node(str);
     }
 }
 
@@ -900,6 +906,24 @@ void CgenNode::register_method(method_class* method) {
   std::stringstream s;
   s << this->name << "." << method->name;
   methods.emplace(s.str(), method);
+
+  // Look in the current dispatch table if we find the same method name.
+  // If so, replace with this occurence.
+  int index = -1;
+  for (unsigned int i = 0; i < method_offsets.size(); i++) {
+    auto mthd_name = method_offsets[i];
+    auto stripped_mthd_name = mthd_name.substr(mthd_name.find(".") + 1, mthd_name.length());
+    if (stripped_mthd_name == std::string(method->name->get_string())) {
+      index = i;
+      break;
+    }
+  }
+
+  if (index < 0) {
+    method_offsets.push_back(s.str());
+  } else {
+    method_offsets[index] = s.str();
+  }
 }
 
 void CgenNode::code(ostream& str) {
@@ -921,10 +945,23 @@ void CgenNode::emit_method_def(ostream& str, std::string const& label, method_cl
   cout << "Emitting code for " << label << endl;
   emit_label_def(label, str);
 
-  // emit code for new stack frame
+  if (label == "Main.main") {
+    emit_label_def("main", str);
+    emit_move(FP, SP, str);
+  } else {
+    int space_needed = method->formals->len() + 1;
+
+    // emit code for new stack frame
+    emit_store(SP, 0, FP, str);
+    emit_move(SP, FP, str);
+    emit_addiu(ACC, ZERO, space_needed * WORD_SIZE, str);
+    emit_sub(FP, FP, ACC, str);
+  }
 
   // emit code for block
   method->expr->code(str);
+
+  // remove stack frame
 
   // emit return code
   emit_return(str);
@@ -935,8 +972,6 @@ void CgenNode::emit_init_def(ostream& str) {
   s << this->name << CLASSINIT_SUFFIX;
   cout << "Emitting code for init method " << s.str() << endl;
   emit_label_def(s.str(), str);
-
-
 
   emit_return(str);
 }
@@ -955,9 +990,30 @@ void assign_class::code(ostream &s) {
 }
 
 void static_dispatch_class::code(ostream &s) {
+  // put arguments on the stack
+  for (int i = actual->first(); i < actual->len(); i++) {
+    actual->nth(i)->code(s);
+    
+    emit_store(ACC, -(i+1), FP, s);
+  }
 }
 
 void dispatch_class::code(ostream &s) {
+    // put arguments on the stack
+  for (int i = actual->first(); i < actual->len(); i++) {
+    actual->nth(i)->code(s);
+    
+    emit_store(ACC, -(i+1), FP, s);
+  }
+
+  expr->code(s);
+
+  // result should be in ACC now. Let's get its class dispatch table
+  // Dispatch table is at 3*WORD_SIZE(ACC)
+  emit_load(ACC, 3, ACC, s);
+
+  // Dispatch table address is now in ACC. The method we want is at a fixed offset in that table
+
 }
 
 void cond_class::code(ostream &s) {
@@ -1027,6 +1083,7 @@ void int_const_class::code(ostream& s)
   // Need to be sure we have an IntEntry *, not an arbitrary Symbol
   //
   emit_load_int(ACC,inttable.lookup_string(token->get_string()),s);
+  emit_load(ACC, 3, ACC, s);
 }
 
 void string_const_class::code(ostream& s)
@@ -1037,6 +1094,7 @@ void string_const_class::code(ostream& s)
 void bool_const_class::code(ostream& s)
 {
   emit_load_bool(ACC, BoolConst(val), s);
+  emit_load(ACC, 3, ACC, s);
 }
 
 void new__class::code(ostream &s) {
