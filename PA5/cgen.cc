@@ -947,16 +947,14 @@ void CgenNode::emit_method_def(ostream& str, std::string const& label, method_cl
 
   if (label == "Main.main") {
     emit_label_def("main", str);
-    emit_move(FP, SP, str);
-  } else {
-    int space_needed = method->formals->len() + 1;
-
-    // emit code for new stack frame
-    emit_store(SP, 0, FP, str);
-    emit_move(SP, FP, str);
-    emit_addiu(ACC, ZERO, space_needed * WORD_SIZE, str);
-    emit_sub(FP, FP, ACC, str);
   }
+
+  int space_needed = 0;
+  
+  // emit code for new stack frame
+  emit_store(FP, 0, SP, str);
+  emit_move(FP, SP, str);
+  emit_addiu(SP, SP, - space_needed * WORD_SIZE, str);
 
   // emit code for block
   method->expr->code(str);
@@ -994,7 +992,8 @@ void static_dispatch_class::code(ostream &s) {
   for (int i = actual->first(); i < actual->len(); i++) {
     actual->nth(i)->code(s);
     
-    emit_store(ACC, -(i+1), FP, s);
+    emit_store(ACC, 0, SP, s);
+    emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
   }
 }
 
@@ -1003,7 +1002,8 @@ void dispatch_class::code(ostream &s) {
   for (int i = actual->first(); i < actual->len(); i++) {
     actual->nth(i)->code(s);
     
-    emit_store(ACC, -(i+1), FP, s);
+    emit_store(ACC, 0, SP, s);
+    emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
   }
 
   expr->code(s);
