@@ -164,7 +164,8 @@ static void emit_load(char *dest_reg, int offset, char *source_reg, ostream& s)
     << endl;
 }
 
-static void emit_store(char *source_reg, int offset, char *dest_reg, ostream& s)
+template<typename T>
+static void emit_store(T source_reg, int offset, char *dest_reg, ostream& s)
 {
   s << SW << source_reg << " " << offset * WORD_SIZE << "(" << dest_reg << ")"
       << endl;
@@ -173,7 +174,7 @@ static void emit_store(char *source_reg, int offset, char *dest_reg, ostream& s)
 static void emit_load_imm(char *dest_reg, int val, ostream& s)
 { s << LI << dest_reg << " " << val << endl; }
 
-static void emit_load_address(char *dest_reg, char *address, ostream& s)
+static void emit_load_address(char *dest_reg, char const *address, ostream& s)
 { s << LA << dest_reg << " " << address << endl; }
 
 static void emit_partial_load_address(char *dest_reg, ostream& s)
@@ -230,7 +231,7 @@ static void emit_sll(char *dest, char *src1, int num, ostream& s)
 static void emit_jalr(char *dest, ostream& s)
 { s << JALR << "\t" << dest << endl; }
 
-static void emit_jal(char *address,ostream &s)
+static void emit_jal(char const *address,ostream &s)
 { s << JAL << address << endl; }
 
 static void emit_return(ostream& s)
@@ -869,8 +870,10 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 }
 
 void CgenNode::register_node(ostream& str) {
-    // get the parent dispatch table
+    // get the parent dispatch table and attributes
     // this is to guarantee the child class has the same offsets in the dispatch table as its parent.
+    this->size = this->get_parentnd()->size;
+    this->offsets = this->get_parentnd()->offsets;
     this->method_offsets = this->get_parentnd()->method_offsets;
 
     for (int n = 0; n < features->len(); n++) {
@@ -899,7 +902,8 @@ void CgenNode::register_node(ostream& str) {
 }
 
 void CgenNode::register_attribute(Symbol name) {
-  offsets.emplace(name, ++size);
+  if (offsets.find(name) == std::end(offsets))
+    offsets.emplace(name, ++size);
 }
 
 void CgenNode::register_method(method_class* method) {
@@ -954,12 +958,16 @@ void CgenNode::emit_method_def(ostream& str, std::string const& label, method_cl
   // emit code for new stack frame
   emit_store(FP, 0, SP, str);
   emit_move(FP, SP, str);
-  emit_addiu(SP, SP, - space_needed * WORD_SIZE, str);
+  if (space_needed != 0) {
+    emit_addiu(SP, SP, - space_needed * WORD_SIZE, str);
+  }
 
   // emit code for block
   method->expr->code(str);
 
   // remove stack frame
+  emit_move(SP, FP, str);
+  emit_load(FP, 0, FP, str);
 
   // emit return code
   emit_return(str);
@@ -970,6 +978,25 @@ void CgenNode::emit_init_def(ostream& str) {
   s << this->name << CLASSINIT_SUFFIX;
   cout << "Emitting code for init method " << s.str() << endl;
   emit_label_def(s.str(), str);
+
+  std::stringstream dispatch_table_sstream;
+  dispatch_table_sstream << this->name << "_dispatch_table";
+
+  // Let's try to do this without creating a stack frame here.
+  // We know that value stored in $sp is the address of the 'this' pointer here.
+  // store the class header:
+  // - the class tag
+  emit_addiu(ACC, ZERO, this->classtag, s);
+  emit_store(ACC, 0, SP, str);
+
+  // - the object size
+  emit_addiu(ACC, ZERO, this->size, s);
+  emit_store(ACC, 1 , SP, str);
+
+  // - the class dispatch table
+  emit_load_address(ACC, dispatch_table_sstream.str().c_str(), str);
+  emit_store(ACC, 2, SP, str);
+
 
   emit_return(str);
 }
@@ -992,8 +1019,8 @@ void static_dispatch_class::code(ostream &s) {
   for (int i = actual->first(); i < actual->len(); i++) {
     actual->nth(i)->code(s);
     
-    emit_store(ACC, 0, SP, s);
     emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
+    emit_store(ACC, 0, SP, s);
   }
 }
 
@@ -1002,8 +1029,8 @@ void dispatch_class::code(ostream &s) {
   for (int i = actual->first(); i < actual->len(); i++) {
     actual->nth(i)->code(s);
     
-    emit_store(ACC, 0, SP, s);
     emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
+    emit_store(ACC, 0, SP, s);
   }
 
   expr->code(s);
@@ -1098,6 +1125,13 @@ void bool_const_class::code(ostream& s)
 }
 
 void new__class::code(ostream &s) {
+  emit_addiu(SP, SP, -4, s);
+  emit_load_address(ACC, "heap_start", s);
+  emit_store(ACC, 0, SP, s);
+  
+  std::stringstream init_method_label;
+  init_method_label << this->type_name << "_init";
+  emit_jal(init_method_label.str().c_str(), s);
 }
 
 void isvoid_class::code(ostream &s) {
