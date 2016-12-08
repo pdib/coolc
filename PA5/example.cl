@@ -16,6 +16,6 @@ class B inherits A {
 class Main {
   bar(): String { "Hello world" };
   foo(): Bool { false };
-  main(): Int { (new A).foo(55) };
+  main(): Int { (new B)@A.bar(55) };
 };
 

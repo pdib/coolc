@@ -69,6 +69,7 @@ public:
    Basicness basic_status;                    // `Basic' if class is basic
                                               // `NotBasic' otherwise
    
+
    void code(ostream& str);
    void emit_method_def(ostream& str, std::string const& label, method_class* method);
 
@@ -77,6 +78,10 @@ public:
    void register_method(method_class* method);
 
    void emit_init_def(ostream& str);
+
+   // Look for method_name in the method offsets table.
+   // If not found, returns the current method offsets table size.
+   size_t look_for_method(Symbol method_name);
 
    int size = 3;
    std::unordered_map<Symbol, int> offsets;

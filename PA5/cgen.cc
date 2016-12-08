@@ -27,9 +27,12 @@
 #include <sstream>
 #include "cgen.h"
 #include "cgen_gc.h"
+#include <unordered_map>
 
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
+
+static std::unordered_map<Symbol, CgenNodeP> s_ClassNodes;
 
 //
 // Three symbols from the semantic analyzer (semant.cc) are used.
@@ -870,6 +873,8 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 }
 
 void CgenNode::register_node(ostream& str) {
+    s_ClassNodes.emplace(this->name, this);
+    
     // get the parent dispatch table and attributes
     // this is to guarantee the child class has the same offsets in the dispatch table as its parent.
     this->size = this->get_parentnd()->size;
@@ -906,24 +911,31 @@ void CgenNode::register_attribute(Symbol name) {
     offsets.emplace(name, ++size);
 }
 
+size_t CgenNode::look_for_method(Symbol method_name) {
+  // Look in the current dispatch table if we find the same method name.
+  // If so, replace with this occurence.
+  std::cout << "Looking for method " << method_name << " in method offsets" << std::endl;
+  
+  size_t index;
+  for (index = 0; index < method_offsets.size(); index++) {
+    auto mthd_name = method_offsets[index];
+    auto stripped_mthd_name = mthd_name.substr(mthd_name.find(".") + 1, mthd_name.length());
+    std::cout << "[" << index << "]" << stripped_mthd_name << std::endl;
+    if (stripped_mthd_name == std::string(method_name->get_string())) {
+      return index;
+    }
+  }
+  return index;
+}
+
 void CgenNode::register_method(method_class* method) {
   std::stringstream s;
   s << this->name << "." << method->name;
   methods.emplace(s.str(), method);
 
-  // Look in the current dispatch table if we find the same method name.
-  // If so, replace with this occurence.
-  int index = -1;
-  for (unsigned int i = 0; i < method_offsets.size(); i++) {
-    auto mthd_name = method_offsets[i];
-    auto stripped_mthd_name = mthd_name.substr(mthd_name.find(".") + 1, mthd_name.length());
-    if (stripped_mthd_name == std::string(method->name->get_string())) {
-      index = i;
-      break;
-    }
-  }
+  size_t index = this->look_for_method(method->name); 
 
-  if (index < 0) {
+  if (index == method_offsets.size()) {
     method_offsets.push_back(s.str());
   } else {
     method_offsets[index] = s.str();
@@ -956,6 +968,7 @@ void CgenNode::emit_method_def(ostream& str, std::string const& label, method_cl
   int space_needed = 0;
   
   // emit code for new stack frame
+  emit_addiu(SP, SP, -1 * WORD_SIZE, str);
   emit_store(FP, 0, SP, str);
   emit_move(FP, SP, str);
   if (space_needed != 0) {
@@ -968,6 +981,7 @@ void CgenNode::emit_method_def(ostream& str, std::string const& label, method_cl
   // remove stack frame
   emit_move(SP, FP, str);
   emit_load(FP, 0, FP, str);
+  emit_addiu(SP, SP, 1 * WORD_SIZE, str);
 
   // emit return code
   emit_return(str);
@@ -983,20 +997,23 @@ void CgenNode::emit_init_def(ostream& str) {
   dispatch_table_sstream << this->name << "_dispatch_table";
 
   // Let's try to do this without creating a stack frame here.
-  // We know that value stored in $sp is the address of the 'this' pointer here.
-  // store the class header:
+  // We know that value stored at the address in 4($sp) is the address of the 'this' pointer here.
+  emit_load(T1, 1, SP, str);
+  
+  // Store the class header:
   // - the class tag
-  emit_addiu(ACC, ZERO, this->classtag, s);
-  emit_store(ACC, 0, SP, str);
+  emit_addiu(ACC, ZERO, this->classtag, str);
+  emit_store(ACC, 0, T1, str);
 
   // - the object size
-  emit_addiu(ACC, ZERO, this->size, s);
-  emit_store(ACC, 1 , SP, str);
+  emit_addiu(ACC, ZERO, this->size, str);
+  emit_store(ACC, 1 , T1, str);
 
   // - the class dispatch table
   emit_load_address(ACC, dispatch_table_sstream.str().c_str(), str);
-  emit_store(ACC, 2, SP, str);
+  emit_store(ACC, 2, T1, str);
 
+  // init the variables
 
   emit_return(str);
 }
@@ -1015,18 +1032,8 @@ void assign_class::code(ostream &s) {
 }
 
 void static_dispatch_class::code(ostream &s) {
-  // put arguments on the stack
-  for (int i = actual->first(); i < actual->len(); i++) {
-    actual->nth(i)->code(s);
-    
-    emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
-    emit_store(ACC, 0, SP, s);
-  }
-}
-
-void dispatch_class::code(ostream &s) {
-    // put arguments on the stack
-  for (int i = actual->first(); i < actual->len(); i++) {
+  // put arguments on the stack in reverse order
+  for (int i = actual->len() - 1; i >= 0; i--) {
     actual->nth(i)->code(s);
     
     emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
@@ -1035,12 +1042,59 @@ void dispatch_class::code(ostream &s) {
 
   expr->code(s);
 
+  // last argument on the stack is the this pointer
+  emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
+  emit_store(ACC, 0, SP, s);
+
+  // put return address on the stack
+  emit_addiu(SP, SP, -1 * WORD_SIZE, s);
+  emit_store(RA, 0, SP, s);
+
+  // Jump to label
+  std::stringstream method_name;
+  method_name << this->type_name << "." << this->name;
+  emit_jal(method_name.str().c_str(), s);
+
+  // Pop the return adress to $ra, the this pointer and all the arguments
+  emit_load(RA, 0, SP, s);  
+  emit_addiu(SP, SP, (2 + actual->len()) * WORD_SIZE, s);
+}
+
+void dispatch_class::code(ostream &s) {
+  // put arguments on the stack in reverse order
+  for (int i = actual->len() - 1; i >= 0; i--) {
+    actual->nth(i)->code(s);
+    
+    emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
+    emit_store(ACC, 0, SP, s);
+  }
+
+  expr->code(s);
+
+  // last argument on the stack is the this pointer
+  emit_addiu(SP, SP, - 1 * WORD_SIZE, s);
+  emit_store(ACC, 0, SP, s);
+
+  // put return address on the stack
+  emit_addiu(SP, SP, -1 * WORD_SIZE, s);
+  emit_store(RA, 0, SP, s);
+
   // result should be in ACC now. Let's get its class dispatch table
-  // Dispatch table is at 3*WORD_SIZE(ACC)
-  emit_load(ACC, 3, ACC, s);
+  // Dispatch table is at 2*WORD_SIZE(ACC)
+  emit_load(ACC, 2, ACC, s);
 
   // Dispatch table address is now in ACC. The method we want is at a fixed offset in that table
+  auto node =  s_ClassNodes[expr->get_type()];
+  size_t offset = node->look_for_method(this->name);
+  
+  emit_load(ACC, offset, ACC, s);
 
+  // Call the method
+  emit_jalr(ACC, s);
+
+  // Pop the return adress to $ra, the this pointer and all the arguments
+  emit_load(RA, 0, SP, s);  
+  emit_addiu(SP, SP, (2 + actual->len()) * WORD_SIZE, s);
 }
 
 void cond_class::code(ostream &s) {
@@ -1125,13 +1179,24 @@ void bool_const_class::code(ostream& s)
 }
 
 void new__class::code(ostream &s) {
-  emit_addiu(SP, SP, -4, s);
+  emit_addiu(SP, SP, -1 * WORD_SIZE, s);
   emit_load_address(ACC, "heap_start", s);
   emit_store(ACC, 0, SP, s);
   
+  // put return address on the stack
+  emit_addiu(SP, SP, -1 * WORD_SIZE, s);
+  emit_store(RA, 0, SP, s);
+
   std::stringstream init_method_label;
   init_method_label << this->type_name << "_init";
   emit_jal(init_method_label.str().c_str(), s);
+
+  // Pop the return adress to $ra and all the arguments
+  // Pop the this pointer to $a0
+  emit_load(RA, 0, SP, s);  
+  emit_addiu(SP, SP, 1 * WORD_SIZE, s);
+  emit_load(ACC, 0, SP, s);  
+  emit_addiu(SP, SP, 1 * WORD_SIZE, s);
 }
 
 void isvoid_class::code(ostream &s) {
