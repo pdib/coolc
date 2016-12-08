@@ -88,6 +88,7 @@ public:
    std::vector<std::string> method_offsets;
    std::unordered_map<std::string, method_class*> methods;
    int classtag = CgenNode::Classtags++;
+
    bool visited = false;  
 };
 

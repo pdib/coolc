@@ -10,7 +10,7 @@ class A {
 
 class B inherits A {
   b: Int <- 5;
-  bar(a: Int): Int {{ 0; }};
+  bar(b: Int): Int {{ b; }};
 };
 
 class Main {

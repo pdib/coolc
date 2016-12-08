@@ -914,13 +914,13 @@ void CgenNode::register_attribute(Symbol name) {
 size_t CgenNode::look_for_method(Symbol method_name) {
   // Look in the current dispatch table if we find the same method name.
   // If so, replace with this occurence.
-  std::cout << "Looking for method " << method_name << " in method offsets" << std::endl;
+  //std::cout << "Looking for method " << method_name << " in method offsets" << std::endl;
   
   size_t index;
   for (index = 0; index < method_offsets.size(); index++) {
     auto mthd_name = method_offsets[index];
     auto stripped_mthd_name = mthd_name.substr(mthd_name.find(".") + 1, mthd_name.length());
-    std::cout << "[" << index << "]" << stripped_mthd_name << std::endl;
+    //std::cout << "[" << index << "]" << stripped_mthd_name << std::endl;
     if (stripped_mthd_name == std::string(method_name->get_string())) {
       return index;
     }
