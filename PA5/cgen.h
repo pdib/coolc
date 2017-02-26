@@ -3,8 +3,9 @@
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
-#include <unordered_map>
+#include <map>
 #include <vector>
+#include <memory>
 
 enum Basicness
 {
@@ -55,6 +56,27 @@ public:
   CgenNodeP root();
 };
 
+struct SymbolLocation {
+  virtual void load_symbol(char const * reg, ostream & s) = 0;
+  virtual void store_to_symbol(char const * reg, ostream & s) = 0;
+};
+
+struct MemberLocation : SymbolLocation{
+  MemberLocation(int offset) : offset(offset) {}
+  void load_symbol(char const * reg, ostream & s) override;
+  void store_to_symbol(char const * reg, ostream & s) override;
+  int offset;
+};
+
+struct StackLocation : SymbolLocation{
+  StackLocation(int offset, char const* from_reg) : offset(offset), from_reg(from_reg) {}
+  void load_symbol(char const * reg, ostream & s) override;
+  void store_to_symbol(char const * reg, ostream & s) override;
+  int offset;
+  char const *  from_reg;
+};
+
+
 class CgenNode : public class__class
 {
 public:
@@ -78,7 +100,7 @@ public:
   void emit_method_def(ostream &str, std::string const &label, method_class *method);
 
   void register_node(ostream &str);
-  void register_attribute(Symbol name);
+  void register_attribute(attr_class* attr);
   void register_method(method_class *method);
 
   void emit_init_def(ostream &str);
@@ -88,12 +110,14 @@ public:
   size_t look_for_method(Symbol method_name);
 
   int size = 3;
-  std::unordered_map<Symbol, int> offsets;
+  std::map<attr_class*, int> offsets;
   std::vector<std::string> method_offsets;
-  std::unordered_map<std::string, method_class *> methods;
+  std::map<std::string, method_class *> methods;
   int classtag = CgenNode::Classtags++;
 
   bool visited = false;
+
+  SymbolTable<Symbol, SymbolLocation> scope;
 };
 
 class BoolConst

@@ -360,6 +360,8 @@ public:
 #ifdef cond_EXTRAS
    cond_EXTRAS
 #endif
+private:
+    static int s_count;
 };
 
 
@@ -382,6 +384,8 @@ public:
 #ifdef loop_EXTRAS
    loop_EXTRAS
 #endif
+private:
+    static int s_count;
 };
 
 
@@ -404,6 +408,8 @@ public:
 #ifdef typcase_EXTRAS
    typcase_EXTRAS
 #endif
+private:
+    static int s_count;
 };
 
 

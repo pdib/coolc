@@ -28,11 +28,14 @@
 #include "cgen.h"
 #include "cgen_gc.h"
 #include <unordered_map>
+#include <stack>
 
 extern void emit_string_constant(ostream &str, char *s);
 extern int cgen_debug;
 
 static std::unordered_map<Symbol, CgenNodeP> s_ClassNodes;
+static SymbolTable<Symbol, SymbolLocation> *current_scope;
+static std::stack<int> stack_frame;
 
 //
 // Three symbols from the semantic analyzer (semant.cc) are used.
@@ -159,14 +162,14 @@ void program_class::cgen(ostream &os)
 //
 //////////////////////////////////////////////////////////////////////////////
 
-static void emit_load(char *dest_reg, int offset, char *source_reg, ostream &s)
+static void emit_load(char const *dest_reg, int offset, char const *source_reg, ostream &s)
 {
   s << LW << dest_reg << " " << offset * WORD_SIZE << "(" << source_reg << ")"
     << endl;
 }
 
 template <typename T>
-static void emit_store(T source_reg, int offset, char *dest_reg, ostream &s)
+static void emit_store(T source_reg, int offset, char const *dest_reg, ostream &s)
 {
   s << SW << source_reg << " " << offset * WORD_SIZE << "(" << dest_reg << ")"
     << endl;
@@ -261,6 +264,12 @@ static void emit_jalr(char *dest, ostream &s)
 static void emit_jal(char const *address, ostream &s)
 {
   s << JAL << address << endl;
+}
+
+template <typename T>
+static void emit_j(T address, ostream &s)
+{
+  s << "J " << address << endl;
 }
 
 static void emit_return(ostream &s)
@@ -362,6 +371,12 @@ static void emit_branch(int l, ostream &s)
   s << endl;
 }
 
+static void emit_xor(char *dest, char *src1, char *src2, ostream &s)
+{
+  s << "xor " << dest << " " << src1 << " " << src2;
+  s << endl;
+}
+
 //
 // Push a register on the stack. The stack grows towards smaller addresses.
 //
@@ -446,7 +461,7 @@ void StringEntry::code_def(ostream &s, int stringclasstag)
   IntEntryP lensym = inttable.add_int(len);
 
   // Add -1 eye catcher
-  // s << WORD << "-1" << endl;
+  s << WORD << "-1" << endl;
 
   code_ref(s);
   s << LABEL                          // label
@@ -491,7 +506,7 @@ void IntEntry::code_ref(ostream &s)
 void IntEntry::code_def(ostream &s, int intclasstag)
 {
   // Add -1 eye catcher
-  // s << WORD << "-1" << endl;
+  s << WORD << "-1" << endl;
 
   code_ref(s);
   s << LABEL                                           // label
@@ -530,7 +545,7 @@ void BoolConst::code_ref(ostream &s) const
 void BoolConst::code_def(ostream &s, int boolclasstag)
 {
   // Add -1 eye catcher
-  // s << WORD << "-1" << endl;
+  s << WORD << "-1" << endl;
 
   code_ref(s);
   s << LABEL                                            // label
@@ -939,13 +954,15 @@ void CgenNode::register_node(ostream &str)
   this->size = this->get_parentnd()->size;
   this->offsets = this->get_parentnd()->offsets;
   this->method_offsets = this->get_parentnd()->method_offsets;
+  this->scope = this->get_parentnd()->scope;
+  this->scope.enterscope();
 
   for (int n = 0; n < features->len(); n++)
   {
     auto attr = dynamic_cast<attr_class *>(features->nth(n));
     if (attr)
     {
-      register_attribute(attr->name);
+      register_attribute(attr);
     }
 
     auto method = dynamic_cast<method_class *>(features->nth(n));
@@ -970,24 +987,24 @@ void CgenNode::register_node(ostream &str)
   }
 }
 
-void CgenNode::register_attribute(Symbol name)
+void CgenNode::register_attribute(attr_class *attr)
 {
-  if (offsets.find(name) == std::end(offsets))
-    offsets.emplace(name, ++size);
+  if (offsets.find(attr) == std::end(offsets))
+  {
+    offsets.emplace(attr, ++size);
+    scope.addid(attr->name, new MemberLocation{size - 1});
+  }
 }
 
 size_t CgenNode::look_for_method(Symbol method_name)
 {
   // Look in the current dispatch table if we find the same method name.
   // If so, replace with this occurence.
-  //std::cout << "Looking for method " << method_name << " in method offsets" << std::endl;
-
   size_t index;
   for (index = 0; index < method_offsets.size(); index++)
   {
     auto mthd_name = method_offsets[index];
     auto stripped_mthd_name = mthd_name.substr(mthd_name.find(".") + 1, mthd_name.length());
-    //std::cout << "[" << index << "]" << stripped_mthd_name << std::endl;
     if (stripped_mthd_name == std::string(method_name->get_string()))
     {
       return index;
@@ -1016,6 +1033,7 @@ void CgenNode::register_method(method_class *method)
 
 void CgenNode::code(ostream &str)
 {
+  current_scope = &this->scope;
   this->emit_init_def(str);
 
   for (auto const &method : this->methods)
@@ -1042,15 +1060,18 @@ void CgenNode::emit_method_def(ostream &str, std::string const &label, method_cl
     emit_label_def("main", str);
   }
 
-  int space_needed = 0;
-
   // emit code for new stack frame
   emit_addiu(SP, SP, -1 * WORD_SIZE, str);
   emit_store(FP, 0, SP, str);
   emit_move(FP, SP, str);
-  if (space_needed != 0)
+
+  stack_frame.push(0);
+  current_scope->enterscope();
+  current_scope->addid(self, new StackLocation{2, FP});
+  for (int i = 0; i < method->formals->len(); i++)
   {
-    emit_addiu(SP, SP, -space_needed * WORD_SIZE, str);
+    auto formal = static_cast<formal_class *>(method->formals->nth(i));
+    current_scope->addid(formal->name, new StackLocation{2 + method->formals->len() - i, FP});
   }
 
   // emit code for block
@@ -1061,6 +1082,8 @@ void CgenNode::emit_method_def(ostream &str, std::string const &label, method_cl
   emit_load(FP, 0, FP, str);
   emit_addiu(SP, SP, 1 * WORD_SIZE, str);
 
+  stack_frame.pop();
+  current_scope->exitscope();
   // emit return code
   emit_return(str);
 }
@@ -1076,8 +1099,11 @@ void CgenNode::emit_init_def(ostream &str)
   dispatch_table_sstream << this->name << "_dispatch_table";
 
   // Let's try to do this without creating a stack frame here.
-  // We know that value stored at the address in 4($sp) is the address of the 'this' pointer here.
+  // We know that value stored at the address in 4($sp) is the 'this' pointer here.
   emit_load(T1, 1, SP, str);
+
+  current_scope->enterscope();
+  current_scope->addid(self, new StackLocation{1, SP});
 
   // Store the class header:
   // - the class tag
@@ -1093,6 +1119,18 @@ void CgenNode::emit_init_def(ostream &str)
   emit_store(ACC, 2, T1, str);
 
   // init the variables
+  for (auto attr_kvp : this->offsets)
+  {
+    auto attr = attr_kvp.first;
+    auto offset = attr_kvp.second;
+    attr->init->code(str);
+    emit_store(ACC, offset - 1, T1, str);
+  }
+
+  // put a marker -1 at the end of the data block.
+  // That's to enable GC to reclaim this block.
+  emit_addiu(ACC, ZERO, -1, str);
+  emit_store(ACC, this->size, T1, str);
 
   emit_return(str);
 }
@@ -1106,10 +1144,6 @@ void CgenNode::emit_init_def(ostream &str)
 //   constant integers, strings, and booleans are provided.
 //
 //*****************************************************************
-
-void assign_class::code(ostream &s)
-{
-}
 
 void static_dispatch_class::code(ostream &s)
 {
@@ -1181,16 +1215,98 @@ void dispatch_class::code(ostream &s)
   emit_addiu(SP, SP, (2 + actual->len()) * WORD_SIZE, s);
 }
 
+int cond_class::s_count = 0;
 void cond_class::code(ostream &s)
 {
+  std::stringstream send, selse, sif;
+  sif << "if_" << cond_class::s_count;
+  selse << "else_" << cond_class::s_count;
+  send << "endif_" << cond_class::s_count;
+
+  pred->code(s);
+  emit_beqz(ACC, 2, s);
+  emit_j(sif.str(), s);
+  emit_j(selse.str(), s);
+
+  emit_label_def(sif.str(), s);
+  then_exp->code(s);
+  emit_j(send.str(), s);
+
+  emit_label_def(selse.str(), s);
+  else_exp->code(s);
+  emit_j(send.str(), s);
+
+  emit_label_def(send.str(), s);
+
+  cond_class::s_count++;
 }
 
+int loop_class::s_count = 0;
 void loop_class::code(ostream &s)
 {
+  std::stringstream send, sbegin;
+  sbegin << "loop_pred_" << loop_class::s_count;
+  send << "loop_end_" << loop_class::s_count;
+
+  emit_label_def(sbegin.str(), s);
+  pred->code(s);
+  emit_bne(ACC, ZERO, 2, s);
+  emit_j(send.str(), s);
+
+  body->code(s);
+  emit_j(sbegin.str(), s);
+  emit_label_def(send.str(), s);
+
+  loop_class::s_count++;
 }
 
+int typcase_class::s_count = 0;
 void typcase_class::code(ostream &s)
 {
+  std::stringstream send;
+  send << "typcase_end_" << typcase_class::s_count;
+  expr->code(s);
+
+  // Load the type identifier of the expression in T1
+  emit_load(T1, 0, ACC, s);
+
+  // Store ACC somewhere that will be referenced in the selected case branch
+  int offset = ++stack_frame.top();
+  emit_store(ACC, offset, FP, s);
+  emit_addiu(SP, SP, -1 * WORD_SIZE, s);
+
+  for (int i = 0; i < cases->len(); i++)
+  {
+    auto branch = static_cast<branch_class *>(cases->nth(i));
+    std::stringstream scase;
+    scase << "typcase_branch_" << typcase_class::s_count << "_" << branch->type_decl;
+    emit_addiu(ACC, ZERO, s_ClassNodes[branch->type_decl]->classtag, s);
+    emit_bne(ACC, ZERO, 2, s);
+    emit_j(scase.str(), s);
+  }
+
+  // Need to emit a runtime error here if no branch matched
+
+  for (int i = 0; i < cases->len(); i++)
+  {
+    auto branch = static_cast<branch_class *>(cases->nth(i));
+    std::stringstream scase;
+    scase << "typcase_branch_" << typcase_class::s_count << "_" << branch->type_decl;
+
+    // need to create a new name in the scope that refers to the previously computed expression.
+    current_scope->enterscope();
+    current_scope->addid(branch->name, new StackLocation{offset, FP});
+    emit_label_def(scase.str(), s);
+    branch->expr->code(s);
+    emit_j(send.str(), s);
+
+    current_scope->exitscope();
+  }
+
+  emit_addiu(SP, SP, 1 * WORD_SIZE, s);
+  --stack_frame.top();
+  emit_label_def(send.str(), s);
+  typcase_class::s_count++;
 }
 
 void block_class::code(ostream &s)
@@ -1201,8 +1317,28 @@ void block_class::code(ostream &s)
   }
 }
 
+void assign_class::code(ostream &s)
+{
+  expr->code(s);
+  emit_move(T1, ACC, s);
+  auto location = current_scope->lookup(name);
+  location->load_symbol(ACC, s);
+}
+
 void let_class::code(ostream &s)
 {
+  current_scope->enterscope();
+  init->code(s);
+  int offset = ++stack_frame.top();
+  emit_store(ACC, offset, FP, s);
+  emit_addiu(SP, SP, -1 * WORD_SIZE, s);
+  current_scope->addid(identifier, new StackLocation{offset, FP});
+  
+  body->code(s);
+
+  emit_addiu(SP, SP, 1 * WORD_SIZE, s);
+  --stack_frame.top();
+  current_scope->exitscope();
 }
 
 void plus_class::code(ostream &s)
@@ -1239,22 +1375,52 @@ void divide_class::code(ostream &s)
 
 void neg_class::code(ostream &s)
 {
+  e1->code(s);
+  emit_xor(T1, T1, T1, s);
+  emit_sub(ACC, T1, ACC, s);
 }
 
 void lt_class::code(ostream &s)
 {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+
+  emit_blt(ACC, T1, 3, s);
+  emit_xor(ACC, ACC, ACC, s);
+  emit_beq(ACC, ZERO, 2, s);
+  emit_addiu(ACC, ZERO, 1, s);
 }
 
 void eq_class::code(ostream &s)
 {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+
+  emit_beq(ACC, T1, 3, s);
+  emit_xor(ACC, ACC, ACC, s);
+  emit_beq(ACC, ZERO, 2, s);
+  emit_addiu(ACC, ZERO, 1, s);
 }
 
 void leq_class::code(ostream &s)
 {
+  e1->code(s);
+  emit_move(T1, ACC, s);
+  e2->code(s);
+
+  emit_bleq(ACC, T1, 3, s);
+  emit_xor(ACC, ACC, ACC, s);
+  emit_beq(ACC, ZERO, 2, s);
+  emit_addiu(ACC, ZERO, 1, s);
 }
 
 void comp_class::code(ostream &s)
 {
+  e1->code(s);
+  emit_addiu(T1, ZERO, 1, s);
+  emit_xor(ACC, ACC, T1, s);
 }
 
 void int_const_class::code(ostream &s)
@@ -1301,12 +1467,45 @@ void new__class::code(ostream &s)
 
 void isvoid_class::code(ostream &s)
 {
+  // 0 == null
+  e1->code(s);
+  emit_beq(ACC, ZERO, 3, s);
+  emit_xor(ACC, ACC, ACC, s);
+  emit_beq(ACC, ZERO, 2, s);
+  emit_addiu(ACC, ZERO, 1, s);
 }
 
 void no_expr_class::code(ostream &s)
 {
+  emit_xor(ACC, ACC, ACC, s);
 }
 
 void object_class::code(ostream &s)
 {
+  auto location = current_scope->lookup(name);
+  location->load_symbol(ACC, s);
+}
+
+void MemberLocation::load_symbol(char const *reg, ostream &s)
+{
+  auto self_location = current_scope->lookup(self);
+  self_location->load_symbol(reg, s);
+  emit_load(reg, offset, reg, s);
+}
+
+void MemberLocation::store_to_symbol(char const *reg, ostream &s)
+{
+  auto self_location = current_scope->lookup(self);
+  self_location->load_symbol(T2, s);
+  emit_store(reg, offset, T2, s);
+}
+
+void StackLocation::load_symbol(char const *reg, ostream &s)
+{
+  emit_load(reg, offset, from_reg, s);
+}
+
+void StackLocation::store_to_symbol(char const *reg, ostream &s)
+{
+  emit_store(reg, offset, from_reg, s);
 }
