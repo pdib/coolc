@@ -1103,6 +1103,7 @@ void CgenNode::emit_init_def(ostream &str)
   emit_load(T1, 1, SP, str);
 
   current_scope->enterscope();
+  stack_frame.push(0);
   current_scope->addid(self, new StackLocation{1, SP});
 
   // Store the class header:
@@ -1124,6 +1125,9 @@ void CgenNode::emit_init_def(ostream &str)
     auto attr = attr_kvp.first;
     auto offset = attr_kvp.second;
     attr->init->code(str);
+
+    // result is in ACC. Reload *this* into T1 (might have been modified by attribute init)  
+    emit_load(T1, 1, SP, str);
     emit_store(ACC, offset - 1, T1, str);
   }
 
@@ -1131,6 +1135,8 @@ void CgenNode::emit_init_def(ostream &str)
   // That's to enable GC to reclaim this block.
   emit_addiu(ACC, ZERO, -1, str);
   emit_store(ACC, this->size, T1, str);
+  stack_frame.pop();
+  current_scope->exitscope();
 
   emit_return(str);
 }
