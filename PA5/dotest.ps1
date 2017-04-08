@@ -1,0 +1,1 @@
+bash.exe -c "LD_LIBRARY_PATH=/usr/local/lib64/ make dotest"
