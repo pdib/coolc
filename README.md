@@ -1,7 +1,16 @@
 # Cool Compiler project
 
-Builds with the following deps (you may be able to build with older deps, but at least these should work):
+## Purpose
+Compiler project for COOL (Classroom Object Oriented Language) for the Stanford Compilers class.
 
+Each programming assignment corresponds to one part of the compiler:
+- Lexer
+- Parser
+- Semantic analyzer
+- Code generation
+
+## Building
+Builds with the following deps (you may be able to build with older deps, but at least these should work):
 - Bison 3.0
 - Flex 2.5
 - G++ 6.2
